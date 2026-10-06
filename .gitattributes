@@ -1,0 +1,4 @@
+# Keep LF everywhere: the formatter check and the shell scripts break on CRLF.
+* text=auto eol=lf
+*.png binary
+*.docx binary

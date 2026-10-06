@@ -1,0 +1,8 @@
+*.env
+.idea/
+
+/bin/
+*.exe
+*.test
+*.out
+coverage.txt
