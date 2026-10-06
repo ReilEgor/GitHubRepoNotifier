@@ -1,0 +1,58 @@
+version: 3
+workdir: ./
+
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+  ignoreNotFoundComponents: false
+
+excludeFiles:
+  - '_test\.go$'
+
+vendors:
+  shared-common:
+    in:
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/contracts
+  shared-model:
+    in:
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/domain/**
+  shared-infra:
+    in:
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/buildinfo
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/config
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/**
+
+commonVendors:
+  - shared-common
+
+components:
+  model:          { in: internal/domain/model/** }
+  service-iface:  { in: internal/domain/service/** }
+  usecase-iface:  { in: internal/domain/usecase/** }
+  usecase-impl:   { in: internal/usecase/** }
+  infrastructure: { in: internal/infrastructure/** }
+  transport:      { in: internal/transport/** }
+  cmd:            { in: cmd/** }
+
+deps:
+  service-iface:
+    mayDependOn: [model]
+
+  usecase-iface:
+    mayDependOn: [model]
+
+  usecase-impl:
+    mayDependOn: [model, service-iface, usecase-iface]
+
+  infrastructure:
+    mayDependOn: [model, service-iface]
+    anyVendorDeps: true
+
+  transport:
+    mayDependOn: [model, usecase-iface, transport]
+    anyVendorDeps: true
+
+  cmd:
+    anyProjectDeps: true
+    anyVendorDeps: true

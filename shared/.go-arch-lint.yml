@@ -1,0 +1,42 @@
+version: 3
+workdir: ./
+
+allow:
+  depOnAnyVendor: true
+  deepScan: false
+  ignoreNotFoundComponents: false
+
+excludeFiles:
+  - '_test\.go$'
+
+components:
+  domain:         { in: domain/** }
+  infrastructure: { in: infrastructure/** }
+  config:         { in: config/** }
+  contracts:      { in: contracts/** }
+  ctxlog:         { in: ctxlog/** }
+  buildinfo:      { in: buildinfo/** }
+
+commonComponents:
+  - ctxlog
+  - contracts
+
+deps:
+  domain:
+    mayDependOn: []
+    anyVendorDeps: true
+  infrastructure:
+    mayDependOn: [domain, config]
+    anyVendorDeps: true
+  config:
+    mayDependOn: []
+    anyVendorDeps: true
+  contracts:
+    mayDependOn: []
+    anyVendorDeps: true
+  ctxlog:
+    mayDependOn: []
+    anyVendorDeps: true
+  buildinfo:
+    mayDependOn: []
+    anyVendorDeps: true
