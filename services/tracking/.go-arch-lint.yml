@@ -1,0 +1,68 @@
+version: 3
+workdir: ./
+
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+  ignoreNotFoundComponents: false
+
+excludeFiles:
+  - '_test\.go$'
+
+vendors:
+  shared-common:
+    in:
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/contracts
+  shared-model:
+    in:
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/domain/**
+  shared-infra:
+    in:
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/buildinfo
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/config
+      - github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/**
+
+commonVendors:
+  - shared-common
+
+components:
+  model:            { in: internal/domain/model/** }
+  repository-iface: { in: internal/domain/repository/** }
+  service-iface:    { in: internal/domain/service/** }
+  usecase-iface:    { in: internal/domain/usecase/** }
+  usecase-impl:     { in: internal/usecase/** }
+  repository-impl:  { in: internal/repository/** }
+  infrastructure:   { in: internal/infrastructure/** }
+  transport:        { in: internal/transport/** }
+  cmd:              { in: cmd/** }
+
+deps:
+  repository-iface:
+    mayDependOn: [model]
+    canUse: [shared-model]
+
+  service-iface:
+    mayDependOn: [model]
+
+  usecase-iface:
+    mayDependOn: [model]
+
+  usecase-impl:
+    mayDependOn: [model, repository-iface, service-iface, usecase-iface]
+
+  repository-impl:
+    mayDependOn: [model, repository-iface]
+    anyVendorDeps: true
+
+  infrastructure:
+    mayDependOn: [model, repository-iface, service-iface]
+    anyVendorDeps: true
+
+  transport:
+    mayDependOn: [model, usecase-iface, transport]
+    anyVendorDeps: true
+
+  cmd:
+    anyProjectDeps: true
+    anyVendorDeps: true

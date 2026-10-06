@@ -1,0 +1,172 @@
+version: "2"
+
+
+run:
+  timeout: 5m # timeout for total work
+  relative-path-mode: gomod # the paths will be relative to the directory of the `go.mod` file.
+  tests: true # include test files in analysis
+  allow-parallel-runners: true # allow multiple parallel golangci-lint instances running.
+  go: '1.25' # define the Go version limit.
+
+
+output:
+  formats:
+    text:
+      colors: true # use colors.
+      print-issued-lines: true # print lines of code with issue.
+      print-linter-name: true # print linter name in the end of issue text.
+  path-mode: "" # print relative paths.
+  sort-order:
+    - linter
+    - severity
+    - file
+  show-stats: true # show statistics per linter.
+
+
+linters:
+  default: none # disables all linters by default.
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocognit
+          - nestif
+  enable:
+    - govet # Vet examines Go source code and reports suspicious constructs.
+    - errcheck # Errcheck is a program for checking for unchecked errors in Go code.
+    - staticcheck # It's the set of rules from staticcheck.
+    - ineffassign # Detects when assignments to existing variables are not used.
+    - unused # Checks Go code for unused constants, variables, functions and types.
+    - bodyclose # Checks whether HTTP response body is closed successfully.
+    - noctx # Detects function and method with missing usage of context.Context.
+    - sqlclosecheck # Checks that sql.Rows, sql.Stmt, sqlx.NamedStmt, pgx.Query are closed.
+    - rowserrcheck # Checks whether Rows.Err of rows is checked successfully.
+
+    - unconvert # Remove unnecessary type conversions.
+    - revive # Fast, configurable, extensible, flexible, and beautiful linter for Go.
+    - whitespace # Whitespace is a linter that checks for unnecessary newlines at the start and end of functions, if, for, etc.
+    - godot # Check if comments end in a period.
+    - misspell # Finds commonly misspelled English words.
+
+    - gocyclo # Computes and checks the cyclomatic complexity of functions.
+    - funlen # Checks for long functions.
+    - gocognit # Computes and checks the cognitive complexity of functions.
+    - nestif # Reports deeply nested if statements.
+
+    - exhaustive # Check exhaustiveness of enum switch statements.
+    - testifylint # Linter checks if examples are testable (have an expected output).
+    - nilerr # Find the code that returns nil even if it checks that the error is not nil.
+    - godox # Check for TODO, FIXME, etc. comments in the code.
+    - wrapcheck # Checks that errors returned from external packages are wrapped.
+
+  settings:
+    govet: # Vet examines Go source code and reports suspicious constructs.
+      disable-all: true
+      enable:
+        - shadow # Check for possible unintended shadowing of variables.
+        - structtag # Check that struct field tags conform to reflect.StructTag.Get.
+        - printf # Check consistency of Printf format strings and arguments.
+        - atomicalign # Check for non-64-bits-aligned arguments to sync/atomic functions.
+        - copylocks # Check for locks erroneously passed by value.
+        - loopclosure # Check references to loop variables from within nested functions.
+        - lostcancel # Check cancel func returned by context.WithCancel is called.
+        - nilfunc # Check for useless comparisons between functions and nil.
+        - unreachable # Check for unreachable code.
+        - errorsas # Report passing non-pointer or non-error values to errors.As.
+        - stdmethods # Check signature of methods of well-known interfaces.
+        - unusedresult # Check for unused results of calls to some functions.
+        - unusedwrite # Checks for unused writes.
+    errcheck: # Errcheck is a program for checking for unchecked errors in Go code.
+      check-type-assertions: true # Report about not checking of errors in type assertions.
+      check-blank: true # Report about not checking of errors in blank identifier.
+      verbose: true # Display function signature instead of selector.
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA1019" # Using a deprecated function, variable, constant or field.
+        - "-ST1000" # Incorrect or missing package comment.
+    gocyclo: # Computes and checks the cyclomatic complexity of functions.
+      min-complexity: 15 # Minimal code complexity to report.
+
+    gocognit: # Computes and checks the cognitive complexity of functions.
+        min-complexity: 20 # Minimal code complexity to report.
+    nestif: # Reports deeply nested if statements.
+      min-complexity: 5 # Minimal complexity of if statements to report.
+    funlen: # Checks for long functions.
+      ignore-comments: true # Ignore comments when counting lines.
+      lines: 120 # Checks the number of lines in a function.
+      statements: 50 # Checks the number of statements in a function.
+    revive: # Fast, configurable, extensible, flexible, and beautiful linter for Go.
+      severity: warning
+      confidence: 0.8
+      rules:
+        - name: atomic
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: range-val-in-closure
+        - name: waitgroup-by-value
+        - name: redefines-builtin-id
+        - name: unconditional-recursion
+
+        - name: error-strings
+        - name: error-naming
+        - name: error-return
+        - name: indent-error-flow
+
+        - name: early-return
+        - name: superfluous-else
+        - name: dot-imports
+        - name: var-naming
+          arguments: [ [ "ID", "URL", "HTTP", "JSON", "API" ] ]
+        - name: unused-parameter
+          arguments:
+            - allow-regex: "^_"
+        - name: use-any
+        - name: blank-imports
+        - name: receiver-naming
+    misspell: # Finds commonly misspelled English words.
+      locale: US
+      mode: restricted # checks only comments.
+    exhaustive: # Check exhaustiveness of enum switch statements.
+      package-scope-only: false # Consider enums only in package scopes, not in inner scopes.
+    testifylint: # Checks usage of github.com/stretchr/testify.
+      enable-all: true
+    godox: # Detects usage of FIXME, TODO and other keywords inside comments.
+      keywords:
+        - TODO
+        - FIXME
+        - BUG
+        - HACK
+    wrapcheck:
+      ignore-package-globs:
+        - google.golang.org/grpc/*
+
+
+formatters:
+  enable:
+    - gci # Check if code and import statements are formatted, with additional rules.
+    - gofumpt # Check if code and import statements are formatted, with additional rules.
+    - golines # Checks if code is formatted, and fixes long lines.
+    - swaggo # Check if swaggo comments are formatted.
+  settings:
+    gci:
+      custom-order: true # Enable custom order of sections.
+      sections:
+        - standard # Standard section: captures all standard packages.
+        - default # Default section: contains all imports that could not be matched to another section type.
+        - blank # Blank section: contains all blank imports. This section is not present unless explicitly enabled.
+        - dot # Dot section: contains all dot imports. This section is not present unless explicitly enabled.
+        - alias # Alias section: contains all alias imports. This section is not present unless explicitly enabled.
+        - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
+    gofumpt:
+      extra-rules: true # Enable extra rules.
+    golines:
+      max-len: 120 # Set the maximum line length.
+      shorten-comments: true # Shorten single-line comments.
+
+
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0
+  fix: false

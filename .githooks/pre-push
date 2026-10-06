@@ -1,0 +1,8 @@
+#!/bin/sh
+# Blocks a push whose code fails the tests, does not build or does not start.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+sh scripts/check.sh test
+sh scripts/check.sh smoke

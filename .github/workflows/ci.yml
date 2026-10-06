@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - services/subscription
+          - services/tracking
+          - services/notification
+          - shared
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Run golangci-lint (${{ matrix.module }})
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.1
+          working-directory: ${{ matrix.module }}
+          args: --timeout=5m
+      - name: Install go-arch-lint
+        run: go install github.com/fe3dback/go-arch-lint@v1.15.0
+      - name: Run go-arch-lint (${{ matrix.module }})
+        run: go-arch-lint check --project-path ./${{ matrix.module }}
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Run Unit Tests
+        run: make test
+
+  smoke:
+    name: Build and Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Build, start every service, check /health and /version
+        run: make smoke

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Blocks a commit whose code is not formatted, fails the linter or crosses a layer boundary.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+sh scripts/check.sh fmt-check
+sh scripts/check.sh lint
+sh scripts/check.sh arch
