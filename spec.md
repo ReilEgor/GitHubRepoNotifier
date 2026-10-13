@@ -89,7 +89,7 @@ RepoNotifier стежить за релізами публічних репоз�
 | Володіє даними | `tracker_db`: `repositories`, `subscriptions`, `outbox_messages` |
 | Надає | gRPC `TrackingService`: `GetOrCreateRepository`. Публікує: `SendNotificationCommand`, `TagUpdatedEvent`. `GET /health`, `GET /version` |
 | Потребує | GitHub REST API; споживає `SubscriptionActivatedEvent`, `UnsubscriptionActivatedEvent`; PostgreSQL; RabbitMQ; Redis для кешу відповідей GitHub |
-| Чому окремо | Створює постійне навантаження, що залежить від кількості репозиторіїв, а не користувачів, і впирається в ліміт запитів GitHub. Єдиний сервіс, що звертається до GitHub; збій чи обмеження GitHub не зачіпає приймання підписок |
+| Чому окремо | Створює постійне навантаження, що залежить від кількості репозиторіїв, а не користувачів, і впирається в ліміт запитів GitHub. Єдиний сервіс, що звертається до GitHub: збій чи обмеження GitHub не зачіпає підтвердження, перегляд і відписку. Нова підписка від нього залежить і відхиляється з `503` (SC-1) |
 
 ### notification
 
