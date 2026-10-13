@@ -11,7 +11,7 @@
 | [definition-of-done.md](definition-of-done.md) | Коли задача вважається завершеною |
 | [checks.md](checks.md) | Що перевіряється автоматично, на якому етапі і що робити, коли перевірка падає |
 
-Шаблони: [templates/spec.md](templates/spec.md), [templates/adr.md](templates/adr.md).
+Шаблони: [templates/spec.md](templates/spec.md), [templates/spec-details.md](templates/spec-details.md), [templates/adr.md](templates/adr.md).
 
 ## Принципи
 
