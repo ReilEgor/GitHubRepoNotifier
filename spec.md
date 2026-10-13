@@ -77,8 +77,8 @@ RepoNotifier стежить за релізами публічних репоз�
 |---|---|
 | Відповідальність | Керує користувачами та підписками від запиту до підтвердження чи відписки |
 | Володіє даними | `subscription_db`: `users`, `repositories`, `subscriptions`, `subscription_sagas`, `outbox_messages` |
-| Надає | REST: `POST /api/v1/subscribe`, `GET /api/v1/subscriptions`, `GET /api/v1/confirm/:token`, `GET /api/v1/unsubscribe/:token`, `GET /health`, `GET /version`, веб-сторінка `/`. gRPC `SubscriptionService`: `Subscribe`, `Unsubscribe`, `ListSubscriptions`, `UpdateTag`. Публікує: `SendConfirmationCommand`, `SubscriptionActivatedEvent`, `UnsubscriptionActivatedEvent` |
-| Потребує | gRPC `TrackingService.GetOrCreateRepository`; споживає `ConfirmationResultEvent`; PostgreSQL; RabbitMQ; Redis для обмеження частоти запитів |
+| Надає | REST: `POST /api/v1/subscribe`, `GET /api/v1/subscriptions`, `GET /api/v1/confirm/:token`, `GET /api/v1/unsubscribe/:token`, `GET /health`, `GET /version`, веб-сторінка `/`. gRPC `SubscriptionService`: `Subscribe`, `Unsubscribe`, `ListSubscriptions`. Публікує: `SendConfirmationCommand`, `SubscriptionActivatedEvent`, `UnsubscriptionActivatedEvent` |
+| Потребує | gRPC `TrackingService.GetOrCreateRepository`; споживає `ConfirmationResultEvent`, `TagUpdatedEvent`; PostgreSQL; RabbitMQ; Redis для обмеження частоти запитів |
 | Чому окремо | Єдиний сервіс, що приймає запити від людей. Навантаження мале й нерівномірне, а вимога одна — швидко відповісти. Він не має зупинятися, коли GitHub або пошта недоступні |
 
 ### tracking
@@ -87,8 +87,8 @@ RepoNotifier стежить за релізами публічних репоз�
 |---|---|
 | Відповідальність | Знає, який реліз кожного репозиторію останній, і виявляє появу нового |
 | Володіє даними | `tracker_db`: `repositories`, `subscriptions`, `outbox_messages` |
-| Надає | gRPC `TrackingService`: `GetOrCreateRepository`. Публікує: `SendNotificationCommand`. `GET /health`, `GET /version` |
-| Потребує | GitHub REST API; gRPC `SubscriptionService.UpdateTag`; споживає `SubscriptionActivatedEvent`, `UnsubscriptionActivatedEvent`; PostgreSQL; RabbitMQ; Redis для кешу відповідей GitHub |
+| Надає | gRPC `TrackingService`: `GetOrCreateRepository`. Публікує: `SendNotificationCommand`, `TagUpdatedEvent`. `GET /health`, `GET /version` |
+| Потребує | GitHub REST API; споживає `SubscriptionActivatedEvent`, `UnsubscriptionActivatedEvent`; PostgreSQL; RabbitMQ; Redis для кешу відповідей GitHub |
 | Чому окремо | Створює постійне навантаження, що залежить від кількості репозиторіїв, а не користувачів, і впирається в ліміт запитів GitHub. Єдиний сервіс, що звертається до GitHub; збій чи обмеження GitHub не зачіпає приймання підписок |
 
 ### notification
@@ -140,7 +140,6 @@ flowchart LR
     S --- SDB[(subscription_db)]
     S --- RL[(Redis: ліміт запитів)]
     S -->|gRPC GetOrCreateRepository| T[tracking]
-    T -->|gRPC UpdateTag| S
     T --- TDB[(tracker_db)]
     T --- RC[(Redis: кеш GitHub)]
     T -->|REST| G[GitHub API]
@@ -150,6 +149,7 @@ flowchart LR
     S -->|subscription.activated| T
     S -->|unsubscription.activated| T
     T -->|notifications| N
+    T -->|repository.tag.updated| S
     N -->|SMTP| M[Поштовий сервер]
 ```
 
@@ -159,7 +159,7 @@ flowchart LR
 |---|---|---|---|---|---|---|
 | 1 | Користувач | subscription | REST | шляхи з розділу 4 | 10 с на підписку, 3 с на решту | відповідь з кодом помилки |
 | 2 | subscription | tracking | gRPC | `TrackingService.GetOrCreateRepository` | у межах часу запиту підписки | `NotFound` стає `404`; `Unavailable` і `ResourceExhausted` стають `503`; підписка не створюється |
-| 3 | tracking | subscription | gRPC | `SubscriptionService.UpdateTag` | одна спроба після фіксації релізу | помилка лише логується; копія тегу в `subscription` відстає до наступного релізу |
+| 3 | tracking | subscription | черга `repository.tag.updated` | `TagUpdatedEvent` | щонайменше один раз, через outbox | подія повертається в чергу; копія тегу в `subscription` відстає, доки її не оброблено |
 | 4 | subscription | notification | черга `confirmations` | `SendConfirmationCommand` | щонайменше один раз, через outbox | див. SC-2 |
 | 5 | notification | subscription | черга `saga.confirmation.results` | `ConfirmationResultEvent` | щонайменше один раз | якщо публікація не вдалася, команда повертається в чергу і лист надсилається повторно |
 | 6 | subscription | tracking | черга `subscription.activated` | `SubscriptionActivatedEvent` | щонайменше один раз, через outbox | подія повертається в чергу; підписник не отримує сповіщень, доки її не оброблено |
@@ -305,7 +305,7 @@ erDiagram
 
 | Дані | Джерело правди | Копія | Чим синхронізується | Допустиме відставання |
 |---|---|---|---|---|
-| Останній побачений тег | `tracker_db.repositories` | `subscription_db.repositories` | значення з відповіді `GetOrCreateRepository` під час підписки; виклик `UpdateTag` після кожного релізу | до наступного релізу; копія лише показується в списку підписок і на розсилку не впливає |
+| Останній побачений тег | `tracker_db.repositories` | `subscription_db.repositories` | значення з відповіді `GetOrCreateRepository` під час підписки; подія `TagUpdatedEvent` після кожного релізу | інтервал ретранслятора плюс час у черзі; копія лише показується в списку підписок і на розсилку не впливає |
 | Підтверджені підписки | `subscription_db.subscriptions` | `tracker_db.subscriptions` | події `SubscriptionActivatedEvent` і `UnsubscriptionActivatedEvent` | інтервал ретранслятора плюс час у черзі |
 | Назва репозиторію | `tracker_db.repositories` | `subscription_db.repositories` | створюється під час підписки | немає: назва не змінюється |
 
@@ -493,10 +493,12 @@ sequenceDiagram
         end
         opt тег відрізняється від збереженого
             T->>T: прочитати підписників
-            T->>T: транзакція — новий тег, outbox на кожного підписника
-            T->>S: UpdateTag
+            T->>T: транзакція — новий тег, outbox на кожного підписника і на подію про тег
         end
     end
+    T->>Q: TagUpdatedEvent (repository.tag.updated)
+    Q->>S: подія
+    S->>S: оновити копію тегу
     T->>Q: SendNotificationCommand (notifications)
     Q->>N: команда
     N->>M: лист про реліз із посиланням відписки
@@ -508,10 +510,11 @@ sequenceDiagram
 |---|---|---|---|---|
 | 1 | tracking | `repositories` | `UPDATE last_seen_tag`, `updated_at` | T1 |
 | 2 | tracking | `outbox_messages` | `INSERT` по одній команді `SendNotificationCommand` на підписника | T1 |
-| 3 | subscription | `repositories` | `UPDATE last_seen_tag` за назвою | T2 |
-| 4 | tracking | `outbox_messages` | `DELETE` кожної опублікованої команди | T3 |
+| 3 | tracking | `outbox_messages` | `INSERT` події `TagUpdatedEvent` | T1 |
+| 4 | tracking | `outbox_messages` | `DELETE` кожного опублікованого запису | T2 |
+| 5 | subscription | `repositories` | `UPDATE last_seen_tag` за назвою | T3 |
 
-Кроки 1–2 фіксуються разом, тому реліз не може бути позначений побаченим без поставлених у чергу листів, і навпаки. Саме це не дає надіслати сповіщення двічі при наступному проході сканера.
+Кроки 1–3 фіксуються разом, тому реліз не може бути позначений побаченим без поставлених у чергу листів, і навпаки. Саме це не дає надіслати сповіщення двічі при наступному проході сканера.
 
 **Гілки збою**
 
@@ -520,9 +523,10 @@ sequenceDiagram
 | запит до GitHub | помилка, ліміт або перевищено 10 с | репозиторій пропускається; решта обробляється; наступний прохід спробує знову |
 | репозиторій | релізів ще немає | змін немає |
 | T1 | збій бази | тег не оновлено, команд немає; наступний прохід виявить реліз знову |
-| крок 3 | `subscription` недоступний | помилка логується; розсилка не зупиняється; копія тегу відстає (відкрите питання 2) |
+| крок 5 | `subscription` недоступний | подія чекає в черзі; розсилка не зупиняється; копія тегу оновиться, коли сервіс повернеться |
+| крок 5 | подію доставлено вдруге | тег перезаписується тим самим значенням |
 | `notification` | команда не розбирається | відхиляється без повтору |
-| `notification` | лист надіслати не вдалося | команда повертається в чергу (відкрите питання 3) |
+| `notification` | лист надіслати не вдалося | команда повертається в чергу (відкрите питання 2) |
 | між двома проходами | вийшло кілька релізів | надсилається один лист — про останній |
 
 ### SC-5. Перегляд підписок
@@ -609,7 +613,7 @@ sequenceDiagram
 | Ретранслятор outbox | `services/*/internal/infrastructure/outbox` | `infrastructure` |
 | Клієнт GitHub із кешем | `services/tracking/internal/infrastructure/clients/github` | `infrastructure` |
 | Клієнт SMTP | `services/notification/internal/infrastructure/clients/email` | `infrastructure` |
-| Клієнт gRPC до сусіднього сервісу | `services/*/internal/infrastructure/adapter` | `infrastructure` |
+| Клієнт gRPC до `tracking` | `services/subscription/internal/infrastructure/adapter` | `infrastructure` |
 | REST | `services/subscription/internal/transport/http` | `transport` |
 | gRPC | `services/*/internal/transport/grpc` | `transport` |
 | Споживачі черг | `services/*/internal/transport/broker/rabbitmq` | `transport` |
@@ -624,8 +628,7 @@ sequenceDiagram
 | № | Питання |
 |---|---|
 | 1 | **Повторна підписка тієї самої пари.** У попередній версії запис оновлюється: токен замінюється новим, а `is_confirmed` скидається у `false`. Підтверджена підписка стає непідтвердженою в `subscription`, але підписник у `tracking` лишається й далі отримує листи. Варіанти: відповідати `409`; або повторно надсилати лист, не чіпаючи підтверджену підписку |
-| 2 | **`UpdateTag` виконується один раз і без повтору.** Якщо `subscription` недоступний, копія тегу відстає до наступного релізу. Варіанти: передавати оновлення через outbox, як решту повідомлень; або прийняти відставання, бо копія лише показується в списку |
-| 3 | **Лист про реліз повторюється без межі.** Команда `SendNotificationCommand` повертається в чергу при будь-якій помилці надсилання, зокрема постійній (неіснуюча адреса). Це суперечить NFR-3. Варіант: розрізняти тимчасові й постійні помилки, як у SC-2 |
-| 4 | **Користувач створюється поза транзакцією підписки.** Якщо транзакція не вдалася, лишається користувач без підписок. Нешкідливо, але інваріанту «користувач має хоча б одну підписку» немає |
-| 5 | **Зайві стовпці в `tracker_db.subscriptions`.** У попередній версії там є `user_id` та `is_confirmed`, які `tracking` не читає й не заповнює. У цій специфікації їх немає; рішення треба підтвердити під час написання першої міграції |
-| 6 | **Ключ API у веб-сторінці.** `POST /subscribe` вимагає ключа, а сторінку відкриває користувач у браузері, тож ключ потрапляє до клієнта. Варіанти: зняти вимогу ключа з публічних шляхів і покладатися на обмеження частоти; або віддавати сторінку через проміжний шар, що додає ключ |
+| 2 | **Лист про реліз повторюється без межі.** Команда `SendNotificationCommand` повертається в чергу при будь-якій помилці надсилання, зокрема постійній (неіснуюча адреса). Це суперечить NFR-3. Варіант: розрізняти тимчасові й постійні помилки, як у SC-2 |
+| 3 | **Користувач створюється поза транзакцією підписки.** Якщо транзакція не вдалася, лишається користувач без підписок. Нешкідливо, але інваріанту «користувач має хоча б одну підписку» немає |
+| 4 | **Зайві стовпці в `tracker_db.subscriptions`.** У попередній версії там є `user_id` та `is_confirmed`, які `tracking` не читає й не заповнює. У цій специфікації їх немає; рішення треба підтвердити під час написання першої міграції |
+| 5 | **Ключ API у веб-сторінці.** `POST /subscribe` вимагає ключа, а сторінку відкриває користувач у браузері, тож ключ потрапляє до клієнта. Варіанти: зняти вимогу ключа з публічних шляхів і покладатися на обмеження частоти; або віддавати сторінку через проміжний шар, що додає ключ |

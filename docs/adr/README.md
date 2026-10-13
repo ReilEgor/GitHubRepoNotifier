@@ -5,3 +5,4 @@
 | № | Рішення | Статус |
 |---|---|---|
 | [0001](0001-split-into-three-services.md) | Система складається з трьох окремих сервісів | accepted |
+| [0002](0002-publish-tag-updates-as-events.md) | Новий тег передається подією, а не gRPC-викликом | accepted |
