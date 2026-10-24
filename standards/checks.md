@@ -9,40 +9,50 @@
 | № | Перевірка | Чим | Ціль `make` | commit | push | CI |
 |---|---|---|---|:-:|:-:|:-:|
 | 1 | Код відформатовано | `golangci-lint fmt`: `gofumpt`, `gci`, `golines` | `fmt-check` | ✔ | | ✔ |
-| 2 | Лінтер і статичний аналіз | `golangci-lint run` | `lint` | ✔ | | ✔ |
+| 2 | Лінтер і статичний аналіз (разом із файлами під тегом `integration`) | `golangci-lint run --build-tags integration` | `lint` | ✔ | | ✔ |
 | 3 | Межі шарів дотримано | `go-arch-lint check` | `arch` | ✔ | | ✔ |
-| 4 | Модульні тести з детектором гонок | `go test -race` | `test` | | ✔ | ✔ |
+| 4 | Модульні тести з детектором гонок, без Docker | `go test -race` | `unit` | | ✔ | ✔ |
 | 5 | Усі сервіси збираються | `go build` | `build` | | ✔ | ✔ |
-| 6 | Smoke-тест | `scripts/check.sh smoke` | `smoke` | | ✔ | ✔ |
+| 6 | Інтеграційні тести на справжньому PostgreSQL | `go test -tags integration` + Testcontainers | `test-integration` | | | ✔ |
+| 7 | Згенерований код (protobuf, wire) актуальний | `buf generate`, `wire`, `git status` | `generate-check` | | | ✔ |
+| 8 | Smoke-тест на Docker Compose | `scripts/check.sh smoke` | `smoke` | | | ✔ |
 
-`make check` запускає всі шість підряд.
+`make check` запускає перевірки 1–5, тобто все, що не потребує Docker. `make test` запускає `unit` і `test-integration`. Перевірки 6–8 потребують запущеного Docker і виконуються в CI; локально їх запускають вручну тією самою командою. Рішення — [ADR-0008](../docs/adr/0008-environment-and-integration-tests.md).
 
 Перевірки 1–4 виконуються окремо в кожному модулі (`shared`, `services/subscription`, `services/tracking`, `services/notification`): у кожного свій `go.mod` і свій `.go-arch-lint.yml`. Конфігурація лінтера одна — `.golangci.yml` у корені.
 
-Швидкі перевірки стоять на коміті, повільні — на відправленні. CI повторює все на чистому середовищі.
+Швидкі перевірки стоять на коміті, повільні — на відправленні, а ті, що потребують Docker, — у CI. CI повторює все на чистому середовищі.
 
 ## Hooks
 
 | Hook | Файл | Що запускає |
 |---|---|---|
 | `pre-commit` | [`.githooks/pre-commit`](../.githooks/pre-commit) | перевірки 1, 2, 3 |
-| `pre-push` | [`.githooks/pre-push`](../.githooks/pre-push) | перевірки 4, 5, 6 |
+| `pre-push` | [`.githooks/pre-push`](../.githooks/pre-push) | перевірки 4, 5 |
 
 Hooks лежать у репозиторії, тож їхні зміни проходять рецензію як код. Вмикаються командою `make setup`, яка виконує `git config core.hooksPath .githooks`.
 
+## Інтеграційні тести
+
+Лежать поруч із кодом за build tag `integration` (`//go:build integration`), тому `go test ./...` без тегу їх не запускає.
+
+1. `TestMain` запускає один контейнер PostgreSQL на пакет тестів (`pgtest.Start`).
+2. Кожен тест отримує свою базу з унікальною назвою (`CREATE DATABASE`), на яку `golang-migrate` з коду застосовує файли з `services/<сервіс>/migrations`, ті самі, що й контейнер `migrate/migrate`.
+3. Сід з відомими токенами лежить у `services/<сервіс>/migrations/testdata/seed.sql`; його застосовує лише тестовий харнес.
+4. Тест `up` → `down` → `up` на порожній базі перевіряє, що кожна міграція зворотна.
+
+На Windows Docker Desktop контейнер-прибиральник Testcontainers (Ryuk) не стартує, тому `scripts/check.sh integration` вимикає його (`TESTCONTAINERS_RYUK_DISABLED=true`); контейнер зупиняє сам `TestMain`. Якщо тести обірвати, контейнер може лишитися: його видаляють командою `docker rm -f`.
+
 ## Smoke-тест
 
-Мінімальна перевірка того, що система запускається. Бізнес-логіку він не перевіряє.
+Перевіряє, що система запускається й проходить головний шлях користувача. Працює на окремому проєкті Compose (`reponotifier-smoke`) і портах `15432`, `15433`, `16379`, тож не можна запускати його одночасно з `docker compose up`.
 
-1. Зібрати три сервіси, вшивши в них хеш поточного коміту.
-2. Запустити кожен на окремому порту (`18080`, `18081`, `18082`).
-3. Дочекатися, доки `GET /health` поверне `200`.
-4. Перевірити, що `GET /version` повертає хеш, який дорівнює `git rev-parse HEAD`.
-5. Зупинити сервіси.
-
-Крок 4 підтверджує, що запущено саме той код, який відправляється, а не зібраний раніше.
-
-Зараз сервіси не мають зовнішніх залежностей, тому smoke-тест запускає бінарні файли напряму й триває кілька секунд. Коли сервісам знадобляться база та брокер, він підніматиме їх через Docker Compose.
+1. Зібрати три сервіси, вшивши хеш поточного коміту.
+2. Підняти PostgreSQL ×2 і Redis, застосувати міграції контейнерами `migrate/migrate`, додати в `tracker_db` сід із `golang/go` (щоб `tracking` не ходив у GitHub).
+3. Запустити сервіси на портах `18080`, `18081`, `18082`; gRPC `tracking` — на `19090`.
+4. Для кожного: `GET /health` дає `200`, `GET /version` дорівнює `git rev-parse HEAD`.
+5. Шлях користувача: підписка (`202`), токен із бази, підтвердження (`200`), список із `"confirmed":true`, відписка (`200`), повторна відписка (`404`), порожній список.
+6. Зупинити сервіси й `docker compose down`.
 
 ## Версії інструментів
 
@@ -51,6 +61,10 @@ Hooks лежать у репозиторії, тож їхні зміни про�
 | Go | 1.25 | `go.mod` кожного модуля, `go.work`, CI |
 | `golangci-lint` | v2.12.1 | `Makefile`, CI |
 | `go-arch-lint` | v1.15.0 | `Makefile`, CI |
+| `wire` | v0.7.0 | `Makefile` (`make setup`), CI |
+| `buf` | v1.71.0 | `Makefile`, CI |
+| `protoc-gen-go` | v1.36.11 | `Makefile`, CI |
+| `protoc-gen-go-grpc` | v1.6.1 | `Makefile`, CI |
 
 ## Що робити, коли перевірка падає
 
@@ -60,6 +74,8 @@ Hooks лежать у репозиторії, тож їхні зміни про�
 | Лінтер | виправити код; якщо правило не підходить для цього місця — `//nolint:<лінтер> // причина` |
 | Межі шарів | перенести код у правильний шар; нова залежність між шарами спершу з'являється в `spec.md` |
 | Тест | виправити код або тест; вимикати тест не можна |
+| Інтеграційний тест | запустити пакет окремо: `cd services/<сервіс> && go test -tags integration ./internal/integration/` |
+| Згенерований код | `make generate` і закомітити результат |
 | Smoke | переглянути `bin/<сервіс>.smoke.log` |
 
 ## Доказ, що конвеєр блокує
@@ -82,18 +98,4 @@ Hooks лежать у репозиторії, тож їхні зміни про�
 
 З `core.autocrlf=true` Git записує файли в робочу теку з `CRLF`, і перевірка формату падає на незміненому коді. Тому в репозиторії є `.gitattributes` з `* text=auto eol=lf`.
 
-## Зміни в Завданні 2 (заплановано)
-
-Рішення — [ADR-0008](../docs/adr/0008-environment-and-integration-tests.md). Станом на зараз цього в `scripts/check.sh` і `Makefile` ще немає; розділ з'явиться в таблицях вище разом із кодом.
-
-| Ціль | Що робить | Docker | Де запускається |
-|---|---|---|---|
-| `make unit` | модульні тести з `-race` | ні | `pre-push`, CI |
-| `make test-integration` | інтеграційні тести на Testcontainers за build tag `integration` | так | окремий job CI, вручну |
-| `make test` | `unit` + `test-integration` | так | вручну |
-| `make smoke` | Docker Compose: PostgreSQL, Redis, міграції, сервіси; підписка → підтвердження → перегляд → відписка | так | лише CI |
-
-Наслідки для hooks: `pre-push` запускає `unit` і збірку. Поточний smoke без бази перестає працювати, коли сервіс починає перевіряти пул бази на старті, тому він переходить у CI.
-
-Лінтер `forbidigo` забороняє `fmt.Sprintf` у `internal/repository` ([ADR-0005](../docs/adr/0005-postgresql-with-pgx-and-plain-sql.md)); це вже діє.
-
+Лінтер `forbidigo` забороняє `fmt.Sprintf` у `internal/repository` ([ADR-0005](../docs/adr/0005-postgresql-with-pgx-and-plain-sql.md)).

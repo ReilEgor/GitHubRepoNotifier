@@ -10,13 +10,14 @@ import (
 	"syscall"
 
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/buildinfo"
-	"github.com/ReilEgor/GitHubRepoNotifier/shared/config"
+	"github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog"
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/httpserver"
-	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/probe"
+	"github.com/caarlos0/env/v11"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With(slog.String("service", "subscription"))
+	jsonHandler := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(ctxlog.NewHandler(jsonHandler)).With(slog.String("service", "subscription"))
 	slog.SetDefault(logger)
 
 	if err := run(); err != nil {
@@ -29,13 +30,24 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	addr := ":" + config.Env("APP_HTTP_PORT", "8080")
+	cfg, err := env.ParseAs[Config]()
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+
+	app, cleanup, err := initApp(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("assemble service: %w", err)
+	}
+	defer cleanup()
+
+	addr := ":" + cfg.HTTPPort
 	slog.InfoContext(ctx, "http server starting",
 		slog.String("addr", addr),
 		slog.String("version", buildinfo.Commit),
 	)
 
-	if err := httpserver.Run(ctx, addr, probe.NewHandler(buildinfo.Commit)); err != nil {
+	if err := httpserver.Run(ctx, addr, app.Handler); err != nil {
 		return fmt.Errorf("run http server: %w", err)
 	}
 	return nil

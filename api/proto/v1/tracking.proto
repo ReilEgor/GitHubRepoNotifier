@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package tracking.v1;
+
+option go_package = "github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/grpc/trackingv1;trackingv1";
+
+// TrackingService is called by subscription to resolve a repository before subscribing to it.
+service TrackingService {
+  // GetOrCreateRepository returns a known repository or verifies it on GitHub and stores it.
+  rpc GetOrCreateRepository(GetOrCreateRepositoryRequest) returns (GetOrCreateRepositoryResponse);
+}
+
+message GetOrCreateRepositoryRequest {
+  // full_name is the repository name in the form owner/repo.
+  string full_name = 1;
+}
+
+message GetOrCreateRepositoryResponse {
+  int64 id = 1;
+  string full_name = 2;
+  string last_seen_tag = 3;
+}
