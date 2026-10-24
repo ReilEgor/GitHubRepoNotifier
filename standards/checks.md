@@ -81,3 +81,19 @@ Hooks лежать у репозиторії, тож їхні зміни про�
 ## Особливість Windows
 
 З `core.autocrlf=true` Git записує файли в робочу теку з `CRLF`, і перевірка формату падає на незміненому коді. Тому в репозиторії є `.gitattributes` з `* text=auto eol=lf`.
+
+## Зміни в Завданні 2 (заплановано)
+
+Рішення — [ADR-0008](../docs/adr/0008-environment-and-integration-tests.md). Станом на зараз цього в `scripts/check.sh` і `Makefile` ще немає; розділ з'явиться в таблицях вище разом із кодом.
+
+| Ціль | Що робить | Docker | Де запускається |
+|---|---|---|---|
+| `make unit` | модульні тести з `-race` | ні | `pre-push`, CI |
+| `make test-integration` | інтеграційні тести на Testcontainers за build tag `integration` | так | окремий job CI, вручну |
+| `make test` | `unit` + `test-integration` | так | вручну |
+| `make smoke` | Docker Compose: PostgreSQL, Redis, міграції, сервіси; підписка → підтвердження → перегляд → відписка | так | лише CI |
+
+Наслідки для hooks: `pre-push` запускає `unit` і збірку. Поточний smoke без бази перестає працювати, коли сервіс починає перевіряти пул бази на старті, тому він переходить у CI.
+
+Лінтер `forbidigo` забороняє `fmt.Sprintf` у `internal/repository` ([ADR-0005](../docs/adr/0005-postgresql-with-pgx-and-plain-sql.md)); це вже діє.
+

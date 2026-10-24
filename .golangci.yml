@@ -32,6 +32,9 @@ linters:
           - funlen
           - gocognit
           - nestif
+      - path-except: internal/repository/
+        linters:
+          - forbidigo
   enable:
     - govet # Vet examines Go source code and reports suspicious constructs.
     - errcheck # Errcheck is a program for checking for unchecked errors in Go code.
@@ -59,6 +62,7 @@ linters:
     - nilerr # Find the code that returns nil even if it checks that the error is not nil.
     - godox # Check for TODO, FIXME, etc. comments in the code.
     - wrapcheck # Checks that errors returned from external packages are wrapped.
+    - forbidigo # Forbids identifiers: SQL must be a literal with positional parameters.
 
   settings:
     govet: # Vet examines Go source code and reports suspicious constructs.
@@ -141,6 +145,10 @@ linters:
     wrapcheck:
       ignore-package-globs:
         - google.golang.org/grpc/*
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Sprintf$
+          msg: build SQL as a named constant with positional parameters, not with fmt.Sprintf
 
 
 formatters:

@@ -28,6 +28,8 @@
 
 ### notification
 
+> **Відкладено до Завдання 3.** Сервіс, черги й ретранслятор не реалізуються в цьому завданні; вони лишаються в специфікації як заплановані.
+
 | Поле | Зміст |
 |---|---|
 | Відповідальність | Надсилає листи за командами з черги |
@@ -92,17 +94,19 @@ flowchart LR
 
 Стрілки з назвами черг проходять через RabbitMQ.
 
+У Завданні 2 діють зв'язки 1, 2 і 9–11. Зв'язки 3–8 і 12 потребують брокера, `notification` і ретранслятора, тому відкладені до Завдання 3.
+
 | № | Звідки | Куди | Спосіб | Контракт | Гарантія | Що буде при збої |
 |---|---|---|---|---|---|---|
-| 1 | Користувач | subscription | REST | шляхи з розділу «Компоненти» | 10 с на підписку, 3 с на решту | відповідь з кодом помилки |
-| 2 | subscription | tracking | gRPC | `TrackingService.GetOrCreateRepository` | у межах часу запиту підписки | `NotFound` стає `404`; `Unavailable` і `ResourceExhausted` стають `503`; підписка не створюється |
+| 1 | Користувач | subscription | REST | шляхи з розділу «Компоненти» | 25 с на підписку, 3 с на решту | відповідь з кодом помилки |
+| 2 | subscription | tracking | gRPC | `TrackingService.GetOrCreateRepository` | у межах часу запиту підписки | `NotFound` стає `404`; `FailedPrecondition` стає `422`; `Unavailable`, `ResourceExhausted` і `DeadlineExceeded` стають `503`; підписка не створюється |
 | 3 | tracking | subscription | черга `repository.tag.updated` | `TagUpdatedEvent` | щонайменше один раз, через outbox | подія повертається в чергу; копія тегу в `subscription` відстає, доки її не оброблено |
 | 4 | subscription | notification | черга `confirmations` | `SendConfirmationCommand` | щонайменше один раз, через outbox | див. SC-2 |
 | 5 | notification | subscription | черга `saga.confirmation.results` | `ConfirmationResultEvent` | щонайменше один раз | якщо публікація не вдалася, команда повертається в чергу і лист надсилається повторно |
 | 6 | subscription | tracking | черга `subscription.activated` | `SubscriptionActivatedEvent` | щонайменше один раз, через outbox | подія повертається в чергу; підписник не отримує сповіщень, доки її не оброблено |
 | 7 | subscription | tracking | черга `unsubscription.activated` | `UnsubscriptionActivatedEvent` | щонайменше один раз, через outbox | подія повертається в чергу; підписник може отримати ще один лист |
 | 8 | tracking | notification | черга `notifications` | `SendNotificationCommand` | щонайменше один раз, через outbox | команда повертається в чергу |
-| 9 | tracking | GitHub API | REST | перевірка репозиторію, останній реліз | 10 с на репозиторій | репозиторій пропускається до наступного проходу сканера |
+| 9 | tracking | GitHub API | REST | перевірка репозиторію, останній реліз | до 3 спроб по 3 с; два виклики на підписку | репозиторій пропускається до наступного проходу сканера |
 | 10 | tracking | Redis | кеш | ключі `repo_exists:<назва>` (1 хв), `release:<назва>` (5 хв) | — | запит іде напряму в GitHub |
 | 11 | subscription | Redis | лічильник | обмеження частоти запитів до REST | — | — |
 | 12 | notification | поштовий сервер | SMTP | лист підтвердження, лист про реліз | час очікування на лист | див. SC-2 і SC-4 |
@@ -132,7 +136,7 @@ flowchart LR
 | Сценарії | `services/*/internal/usecase` | `usecase-impl` |
 | Сага | `services/subscription/internal/saga` | `saga` |
 | Репозиторії | `services/*/internal/repository/postgres` | `repository-impl` |
-| Ретранслятор outbox | `services/*/internal/infrastructure/outbox` | `infrastructure` |
+| Ретранслятор outbox (відкладено до Завдання 3) | `services/*/internal/infrastructure/outbox` | `infrastructure` |
 | Клієнт GitHub із кешем | `services/tracking/internal/infrastructure/clients/github` | `infrastructure` |
 | Клієнт SMTP | `services/notification/internal/infrastructure/clients/email` | `infrastructure` |
 | Клієнт gRPC до `tracking` | `services/subscription/internal/infrastructure/adapter` | `infrastructure` |
