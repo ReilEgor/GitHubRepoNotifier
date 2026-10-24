@@ -3,30 +3,31 @@
 package main
 
 import (
+	"context"
+
 	"github.com/google/wire"
 
 	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/domain/repository"
-	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/domain/service"
 	domainusecase "github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/domain/usecase"
-	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/infrastructure/clients/github"
-	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/repository/memory"
+	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/repository/postgres"
 	trackinggrpc "github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/transport/grpc"
 	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/usecase"
 )
 
 // repositorySet provides the repositories. Replacing it switches the storage.
 var repositorySet = wire.NewSet(
-	memory.NewRepositoryRepository,
-	wire.Bind(new(repository.RepositoryRepository), new(*memory.RepositoryRepository)),
+	providePool,
+	postgres.NewRepositoryRepository,
+	wire.Bind(new(repository.RepositoryRepository), new(*postgres.RepositoryRepository)),
 )
 
-// githubSet provides the GitHub client. Replacing it switches from the static list to GitHub.
+// githubSet provides the GitHub client. Replacing it switches between GitHub and the static list.
 var githubSet = wire.NewSet(
-	github.NewStaticClient,
-	wire.Bind(new(service.GitHubClient), new(*github.StaticClient)),
+	provideRedis,
+	provideGitHub,
 )
 
-func initApp(cfg Config) *App {
+func initApp(ctx context.Context, cfg Config) (*App, func(), error) {
 	wire.Build(
 		repositorySet,
 		githubSet,
@@ -36,5 +37,5 @@ func initApp(cfg Config) *App {
 		provideGRPCServer,
 		newApp,
 	)
-	return nil
+	return nil, nil, nil
 }

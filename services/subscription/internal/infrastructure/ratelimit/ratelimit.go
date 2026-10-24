@@ -68,9 +68,3 @@ func (r *Redis) Allow(ctx context.Context, key string) (bool, error) {
 	}
 	return n <= r.limit, nil
 }
-
-// Disabled allows every request. It is used when no Redis is configured.
-type Disabled struct{}
-
-// Allow always allows.
-func (Disabled) Allow(context.Context, string) (bool, error) { return true, nil }
