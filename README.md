@@ -242,7 +242,7 @@ make check      # усі перевірки
 | `make check` | формат, лінтер, межі шарів, `unit`, `build` — те, що запускають hooks; Docker не потрібен |
 | `make run-subscription`, `run-tracking`, `run-notification` | запускає один сервіс |
 
-Інфраструктура для розробки: `docker compose up -d --wait` піднімає PostgreSQL ×2 і Redis на портах `15432`, `15433`, `16379`; `docker compose --profile migrate run --rm migrate-subscription` і `… migrate-tracker` застосовують міграції. Рішення — [ADR-0008](docs/adr/0008-environment-and-integration-tests.md).
+Інфраструктура для розробки: `docker compose up -d --wait` піднімає PostgreSQL ×2 і Redis на портах `15432`, `15433`, `16379`; `docker compose --profile migrate run --rm migrate-subscription` і `… migrate-tracker` застосовують міграції. Приклад змінних — `.env.example`. Рішення — [ADR-0008](docs/adr/0008-environment-and-integration-tests.md).
 
 Перевірити версію запущеного сервісу:
 
@@ -261,19 +261,20 @@ curl http://localhost:8080/version    # {"version":"<хеш коміту>"}
 | `APP_API_KEY` | subscription, tracking | обов'язкова; ключ для `X-API-Key` (HTTP) і `x-api-key` (gRPC між сервісами) |
 | `APP_GRPC_PORT` | tracking | `9090`; порт gRPC-сервера `TrackingService` |
 | `TRACKING_GRPC_ADDR` | subscription | `localhost:9090`; адреса gRPC `tracking` |
-| `REDIS_HOST` | subscription | порожньо; якщо не задано, обмежувач частоти вимкнений |
-| `REDIS_PORT` | subscription | `6379` |
-| `REDIS_PASSWORD` | subscription | порожньо |
+| `DB_URL` | subscription, tracking | обов'язкова; рядок підключення до власної бази PostgreSQL. Без доступної бази сервіс не стартує |
+| `REDIS_HOST` | subscription, tracking | обов'язкова; Redis: обмежувач частоти (subscription) і кеш GitHub (tracking). Недоступний Redis сервіс не зупиняє |
+| `REDIS_PORT` | subscription, tracking | `6379` |
+| `REDIS_PASSWORD` | subscription, tracking | порожньо |
+| `GITHUB_API_URL` | tracking | `https://api.github.com` |
+| `GITHUB_TOKEN` | tracking | порожньо; токен GitHub підвищує ліміт запитів до API |
+| `GITHUB_HTTP_TIMEOUT` | tracking | `3s`; час на одну спробу запиту до GitHub (спроб до трьох) |
 | `RATE_LIMIT` | subscription | `10-S`; ліміт запитів з однієї адреси (`S`, `M` або `H`) |
 
 Змінні, що з'являться разом із відповідним кодом:
 
 | Змінна | Сервіс | Призначення |
 |---|---|---|
-| `DB_URL` | subscription, tracking | рядок підключення до власної бази PostgreSQL |
 | `RABBITMQ_URL` | усі | підключення до брокера |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | tracking | кеш відповідей GitHub |
-| `GITHUB_TOKEN` | tracking | токен GitHub — підвищує ліміт запитів до API |
 | `SCAN_INTERVAL` | tracking | як часто сканер перевіряє релізи |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_FROM` | notification | параметри SMTP |
 | `APP_BASE_URL` | subscription | зовнішня адреса для посилань у листах |

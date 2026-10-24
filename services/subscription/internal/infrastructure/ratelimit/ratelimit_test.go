@@ -77,10 +77,4 @@ func TestRedis_Allow(t *testing.T) {
 
 		require.Error(t, err)
 	})
-
-	t.Run("success - disabled limiter allows everything", func(t *testing.T) {
-		ok, err := ratelimit.Disabled{}.Allow(ctx, "x")
-		require.NoError(t, err)
-		assert.True(t, ok)
-	})
 }

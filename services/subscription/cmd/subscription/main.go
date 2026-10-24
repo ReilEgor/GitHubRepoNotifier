@@ -35,7 +35,7 @@ func run() error {
 		return fmt.Errorf("read config: %w", err)
 	}
 
-	app, cleanup, err := initApp(cfg)
+	app, cleanup, err := initApp(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("assemble service: %w", err)
 	}

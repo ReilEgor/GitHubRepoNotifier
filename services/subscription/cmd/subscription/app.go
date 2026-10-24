@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,9 +10,12 @@ import (
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/buildinfo"
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/probe"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	sharedPostgres "github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/storage/postgres"
 
 	"github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/infrastructure/adapter"
 	"github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/infrastructure/ratelimit"
@@ -44,11 +48,17 @@ func provideTrackingClient(conn *grpc.ClientConn, cfg Config) *adapter.TrackingC
 	return adapter.NewTrackingClient(conn, cfg.APIKey)
 }
 
-// provideLimiter returns the Redis limiter, or one that allows everything when no Redis is configured.
-func provideLimiter(cfg Config) (middleware.Limiter, func(), error) {
-	if cfg.RedisHost == "" {
-		return ratelimit.Disabled{}, func() {}, nil
+// providePool opens the connection pool and checks the database; a service whose database is down does not start.
+func providePool(ctx context.Context, cfg Config) (*pgxpool.Pool, func(), error) {
+	pool, err := sharedPostgres.NewPool(ctx, cfg.DBURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
+	return pool, pool.Close, nil
+}
+
+// provideLimiter returns the limiter that counts requests in Redis.
+func provideLimiter(cfg Config) (middleware.Limiter, func(), error) {
 	limit, window, err := ratelimit.ParseRate(cfg.RateLimit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("rate limit: %w", err)

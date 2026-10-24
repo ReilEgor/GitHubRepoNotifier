@@ -36,7 +36,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("read config: %w", err)
 	}
-	app := initApp(cfg)
+	app, cleanup, err := initApp(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("assemble service: %w", err)
+	}
+	defer cleanup()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
