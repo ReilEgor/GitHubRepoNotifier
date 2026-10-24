@@ -238,6 +238,8 @@ make check      # усі перевірки
 | `make check` | усе перелічене разом — те саме, що запускають hooks |
 | `make run-subscription`, `run-tracking`, `run-notification` | запускає один сервіс |
 
+У Завданні 2 додадуться цілі `make unit`, `make test-integration` і `make smoke` на Docker Compose (порти `15432`, `15433`, `16379`); див. [ADR-0008](docs/adr/0008-environment-and-integration-tests.md).
+
 Перевірити версію запущеного сервісу:
 
 ```bash
