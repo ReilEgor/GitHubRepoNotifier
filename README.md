@@ -232,13 +232,17 @@ make check      # усі перевірки
 | `make fmt-check` | перевіряє формат, нічого не змінюючи |
 | `make lint` | лінтер і статичний аналіз у кожному модулі |
 | `make arch` | перевірка меж шарів у кожному модулі |
-| `make test` | модульні тести з детектором гонок |
+| `make unit` | модульні тести з детектором гонок, без Docker |
+| `make test-integration` | інтеграційні тести на PostgreSQL у Testcontainers (потрібен Docker) |
+| `make test` | `unit` і `test-integration` |
+| `make generate` | перегенерує protobuf і wire |
+| `make generate-check` | падає, якщо згенерований код застарів |
 | `make build` | збирає сервіси в `bin/`, вшиваючи хеш коміту для `/version` |
-| `make smoke` | збирає, запускає кожен сервіс і перевіряє `/health` та `/version` |
-| `make check` | усе перелічене разом — те саме, що запускають hooks |
+| `make smoke` | Docker Compose: міграції, сервіси, шлях підписка → підтвердження → список → відписка (потрібен Docker, у CI) |
+| `make check` | формат, лінтер, межі шарів, `unit`, `build` — те, що запускають hooks; Docker не потрібен |
 | `make run-subscription`, `run-tracking`, `run-notification` | запускає один сервіс |
 
-У Завданні 2 додадуться цілі `make unit`, `make test-integration` і `make smoke` на Docker Compose (порти `15432`, `15433`, `16379`); див. [ADR-0008](docs/adr/0008-environment-and-integration-tests.md).
+Інфраструктура для розробки: `docker compose up -d --wait` піднімає PostgreSQL ×2 і Redis на портах `15432`, `15433`, `16379`; `docker compose --profile migrate run --rm migrate-subscription` і `… migrate-tracker` застосовують міграції. Рішення — [ADR-0008](docs/adr/0008-environment-and-integration-tests.md).
 
 Перевірити версію запущеного сервісу:
 
