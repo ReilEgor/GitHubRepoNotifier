@@ -99,7 +99,7 @@ cmd_smoke() {
 	for s in $SERVICES; do
 		eval "port=\$SMOKE_PORT_$s"
 		eval "port_env=\$PORT_ENV_$s"
-		env "$port_env=$port" "$BIN/$s$ext" >"$BIN/$s.smoke.log" 2>&1 &
+		env "$port_env=$port" APP_API_KEY=smoke-key "$BIN/$s$ext" >"$BIN/$s.smoke.log" 2>&1 &
 		pids="$pids $!"
 	done
 

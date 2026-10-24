@@ -254,6 +254,13 @@ curl http://localhost:8080/version    # {"version":"<хеш коміту>"}
 | `APP_HTTP_PORT` | subscription | `8080` |
 | `WORKER_HEALTH_PORT` | tracking | `8081` |
 | `SENDER_HEALTH_PORT` | notification | `8082` |
+| `APP_API_KEY` | subscription, tracking | обов'язкова; ключ для `X-API-Key` (HTTP) і `x-api-key` (gRPC між сервісами) |
+| `APP_GRPC_PORT` | tracking | `9090`; порт gRPC-сервера `TrackingService` |
+| `TRACKING_GRPC_ADDR` | subscription | `localhost:9090`; адреса gRPC `tracking` |
+| `REDIS_HOST` | subscription | порожньо; якщо не задано, обмежувач частоти вимкнений |
+| `REDIS_PORT` | subscription | `6379` |
+| `REDIS_PASSWORD` | subscription | порожньо |
+| `RATE_LIMIT` | subscription | `10-S`; ліміт запитів з однієї адреси (`S`, `M` або `H`) |
 
 Змінні, що з'являться разом із відповідним кодом:
 
@@ -261,13 +268,11 @@ curl http://localhost:8080/version    # {"version":"<хеш коміту>"}
 |---|---|---|
 | `DB_URL` | subscription, tracking | рядок підключення до власної бази PostgreSQL |
 | `RABBITMQ_URL` | усі | підключення до брокера |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | subscription, tracking | обмеження частоти запитів; кеш відповідей GitHub |
-| `APP_API_KEY` | subscription, tracking | ключ для `X-API-Key`: підписка, перегляд підписок і gRPC-виклики між сервісами |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | tracking | кеш відповідей GitHub |
 | `GITHUB_TOKEN` | tracking | токен GitHub — підвищує ліміт запитів до API |
 | `SCAN_INTERVAL` | tracking | як часто сканер перевіряє релізи |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_FROM` | notification | параметри SMTP |
 | `APP_BASE_URL` | subscription | зовнішня адреса для посилань у листах |
-| `APP_GRPC_PORT` | subscription | порт gRPC |
 
 Файли `.env` із реальними значеннями до репозиторію не потрапляють.
 

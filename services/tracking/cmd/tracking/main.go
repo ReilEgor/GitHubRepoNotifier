@@ -10,13 +10,16 @@ import (
 	"syscall"
 
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/buildinfo"
-	"github.com/ReilEgor/GitHubRepoNotifier/shared/config"
+	"github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog"
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/httpserver"
-	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/probe"
+	"github.com/caarlos0/env/v11"
+
+	trackinggrpc "github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/transport/grpc"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With(slog.String("service", "tracking"))
+	jsonHandler := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(ctxlog.NewHandler(jsonHandler)).With(slog.String("service", "tracking"))
 	slog.SetDefault(logger)
 
 	if err := run(); err != nil {
@@ -29,14 +32,30 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	addr := ":" + config.Env("WORKER_HEALTH_PORT", "8081")
-	slog.InfoContext(ctx, "http server starting",
-		slog.String("addr", addr),
+	cfg, err := env.ParseAs[Config]()
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+	app := initApp(cfg)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 2)
+	go func() { errCh <- trackinggrpc.Run(ctx, ":"+cfg.GRPCPort, app.GRPC) }()
+	go func() { errCh <- httpserver.Run(ctx, ":"+cfg.HealthPort, app.Probe) }()
+
+	slog.InfoContext(ctx, "tracking starting",
+		slog.String("grpc_port", cfg.GRPCPort),
+		slog.String("health_port", cfg.HealthPort),
 		slog.String("version", buildinfo.Commit),
 	)
 
-	if err := httpserver.Run(ctx, addr, probe.NewHandler(buildinfo.Commit)); err != nil {
-		return fmt.Errorf("run http server: %w", err)
+	err = <-errCh
+	cancel()
+	<-errCh
+	if err != nil {
+		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
 }
