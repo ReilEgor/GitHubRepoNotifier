@@ -37,6 +37,7 @@ components:
   transport-grpc:   { in: internal/transport/grpc }
   transport-broker: { in: internal/transport/broker/** }
   cmd:              { in: cmd/** }
+  migrations:       { in: migrations }
 
 deps:
   repository-iface:
@@ -66,6 +67,9 @@ deps:
 
   transport-broker:
     mayDependOn: [model, usecase-iface]
+    anyVendorDeps: true
+
+  migrations:
     anyVendorDeps: true
 
   cmd:
