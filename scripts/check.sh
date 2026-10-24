@@ -56,7 +56,7 @@ cmd_lint() {
 	need golangci-lint
 	for m in $MODULES; do
 		step "lint $m"
-		(cd "$m" && golangci-lint run --timeout=5m)
+		(cd "$m" && golangci-lint run --timeout=5m --build-tags integration)
 	done
 }
 
