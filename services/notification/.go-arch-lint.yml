@@ -32,7 +32,7 @@ components:
   usecase-iface:  { in: internal/domain/usecase/** }
   usecase-impl:   { in: internal/usecase/** }
   infrastructure: { in: internal/infrastructure/** }
-  transport:      { in: internal/transport/** }
+  transport-broker: { in: internal/transport/broker/** }
   cmd:            { in: cmd/** }
 
 deps:
@@ -49,8 +49,8 @@ deps:
     mayDependOn: [model, service-iface]
     anyVendorDeps: true
 
-  transport:
-    mayDependOn: [model, usecase-iface, transport]
+  transport-broker:
+    mayDependOn: [model, usecase-iface]
     anyVendorDeps: true
 
   cmd:

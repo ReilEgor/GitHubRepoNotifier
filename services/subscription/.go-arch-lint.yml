@@ -10,6 +10,9 @@ excludeFiles:
   - '_test\.go$'
 
 vendors:
+  uuid:
+    in:
+      - github.com/google/uuid
   shared-common:
     in:
       - github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog
@@ -34,8 +37,13 @@ components:
   saga:             { in: internal/saga/** }
   repository-impl:  { in: internal/repository/** }
   infrastructure:   { in: internal/infrastructure/** }
-  transport:        { in: internal/transport/** }
+  transport-http:       { in: internal/transport/http }
+  transport-dto:        { in: internal/transport/http/dto }
+  transport-middleware: { in: internal/transport/http/middleware }
+  transport-grpc:       { in: internal/transport/grpc }
+  transport-broker:     { in: internal/transport/broker/** }
   cmd:              { in: cmd/** }
+  migrations:       { in: migrations }
 
 deps:
   repository-iface:
@@ -47,6 +55,7 @@ deps:
 
   usecase-impl:
     mayDependOn: [model, repository-iface, usecase-iface, saga]
+    canUse: [uuid]
 
   saga:
     mayDependOn: [model, repository-iface]
@@ -59,8 +68,27 @@ deps:
     mayDependOn: [model, repository-iface, usecase-iface]
     anyVendorDeps: true
 
-  transport:
-    mayDependOn: [model, usecase-iface, transport]
+  transport-http:
+    mayDependOn: [model, usecase-iface, transport-dto, transport-middleware]
+    anyVendorDeps: true
+
+  transport-dto:
+    mayDependOn: [model]
+    anyVendorDeps: true
+
+  transport-middleware:
+    mayDependOn: [model, transport-dto]
+    anyVendorDeps: true
+
+  transport-grpc:
+    mayDependOn: [model, usecase-iface]
+    anyVendorDeps: true
+
+  transport-broker:
+    mayDependOn: [model, usecase-iface]
+    anyVendorDeps: true
+
+  migrations:
     anyVendorDeps: true
 
   cmd:

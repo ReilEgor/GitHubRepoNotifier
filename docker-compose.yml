@@ -1,0 +1,62 @@
+# Local infrastructure for development, integration checks and the smoke test.
+# Host ports are deliberately non-standard so they never clash with a locally installed PostgreSQL or Redis.
+name: reponotifier
+
+services:
+  postgres-subscription:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: subscription
+      POSTGRES_PASSWORD: subscription
+      POSTGRES_DB: subscription_db
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U subscription -d subscription_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  postgres-tracker:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: tracker
+      POSTGRES_DB: tracker_db
+    ports:
+      - "15433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d tracker_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate-subscription:
+    image: migrate/migrate:v4.19.0
+    profiles: ["migrate"]
+    depends_on:
+      postgres-subscription:
+        condition: service_healthy
+    volumes:
+      - ./services/subscription/migrations:/migrations:ro
+    command: ["-path", "/migrations", "-database", "postgres://subscription:subscription@postgres-subscription:5432/subscription_db?sslmode=disable", "up"]
+
+  migrate-tracker:
+    image: migrate/migrate:v4.19.0
+    profiles: ["migrate"]
+    depends_on:
+      postgres-tracker:
+        condition: service_healthy
+    volumes:
+      - ./services/tracking/migrations:/migrations:ro
+    command: ["-path", "/migrations", "-database", "postgres://tracker:tracker@postgres-tracker:5432/tracker_db?sslmode=disable", "up"]
