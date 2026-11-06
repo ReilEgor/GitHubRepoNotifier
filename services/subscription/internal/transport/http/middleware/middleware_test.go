@@ -165,3 +165,69 @@ func TestRateLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestAccessLog(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		handler    gin.HandlerFunc
+		wantStatus int
+		wantRoute  string
+	}{
+		{
+			name:       "success - completed request is logged with its route template",
+			target:     "/api/v1/confirm/secret-token",
+			handler:    func(c *gin.Context) { c.Status(http.StatusOK) },
+			wantStatus: 200,
+			wantRoute:  "/api/v1/confirm/:token",
+		},
+		{
+			name:       "error - failed request is logged with its status",
+			target:     "/api/v1/confirm/secret-token",
+			handler:    func(*gin.Context) { panic("boom") },
+			wantStatus: 500,
+			wantRoute:  "/api/v1/confirm/:token",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureLogs(t)
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.Use(middleware.RequestID(), middleware.AccessLog(), middleware.Recovery())
+			r.GET("/api/v1/confirm/:token", tt.handler)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, tt.target, nil)
+			req.Header.Set(middleware.HeaderRequestID, "req-9")
+
+			r.ServeHTTP(httptest.NewRecorder(), req)
+
+			var completed map[string]any
+			for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+				var rec map[string]any
+				require.NoError(t, json.Unmarshal(line, &rec))
+				if rec["msg"] == "request completed" {
+					completed = rec
+				}
+			}
+			require.NotNil(t, completed, "a completion record is written")
+			assert.Equal(t, "req-9", completed["request_id"])
+			assert.Equal(t, tt.wantRoute, completed["route"])
+			assert.InDelta(t, tt.wantStatus, completed["status"], 0)
+			assert.Contains(t, completed, "duration")
+			assert.NotContains(t, logs.String(), "secret-token", "the token never reaches the log")
+		})
+	}
+
+	t.Run("success - unknown route is logged as unmatched", func(t *testing.T) {
+		logs := captureLogs(t)
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(middleware.RequestID(), middleware.AccessLog())
+
+		r.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope/secret", nil))
+
+		assert.Contains(t, logs.String(), `"route":"unmatched"`)
+		assert.NotContains(t, logs.String(), "secret")
+	})
+}

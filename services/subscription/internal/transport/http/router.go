@@ -12,7 +12,7 @@ import (
 func NewRouter(h *Handler, limiter middleware.Limiter, apiKey string, probe http.Handler) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(middleware.RequestID(), middleware.Recovery(), middleware.HandleErrors())
+	r.Use(middleware.RequestID(), middleware.AccessLog(), middleware.Recovery(), middleware.HandleErrors())
 
 	r.GET("/health", gin.WrapH(probe))
 	r.GET("/version", gin.WrapH(probe))
