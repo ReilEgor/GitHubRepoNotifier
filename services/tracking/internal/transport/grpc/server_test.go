@@ -1,11 +1,15 @@
 package grpc_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"testing"
 
+	"github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -99,6 +103,47 @@ func TestServer_GetOrCreateRepository(t *testing.T) {
 				assert.Equal(t, "v1.0.0", resp.GetLastSeenTag())
 				assert.NotZero(t, resp.GetId())
 			}
+		})
+	}
+}
+
+func TestServer_logsEveryCallWithRequestID(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(ctxlog.NewHandler(slog.NewJSONHandler(&buf, nil))))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	client := newClient(t)
+
+	calls := []struct {
+		name, key, repo, wantMsg, wantCode string
+	}{
+		{"success - completed call", testKey, github.StaticExisting, "grpc call completed", "OK"},
+		{"error - failed call", testKey, github.StaticNotFound, "grpc call failed", "NotFound"},
+		{"error - rejected key is logged too", "wrong", github.StaticExisting, "grpc call failed", "Unauthenticated"},
+	}
+	for i, tt := range calls {
+		t.Run(tt.name, func(t *testing.T) {
+			id := fmt.Sprintf("req-%d", i)
+			ctx := metadata.AppendToOutgoingContext(context.Background(), "x-api-key", tt.key, "x-request-id", id)
+			buf.Reset()
+
+			_, callErr := client.GetOrCreateRepository(ctx, &pb.GetOrCreateRepositoryRequest{FullName: tt.repo})
+			assert.Equal(t, tt.wantCode, status.Code(callErr).String())
+
+			var rec map[string]any
+			for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte{10}) {
+				var r map[string]any
+				require.NoError(t, json.Unmarshal(line, &r))
+				if r["msg"] == "grpc call completed" || r["msg"] == "grpc call failed" {
+					require.Nil(t, rec, "exactly one call record per call")
+					rec = r
+				}
+			}
+			require.NotNil(t, rec, "the call is logged")
+			assert.Equal(t, tt.wantMsg, rec["msg"])
+			assert.Equal(t, tt.wantCode, rec["code"])
+			assert.Equal(t, id, rec["request_id"])
+			assert.Contains(t, rec, "duration")
 		})
 	}
 }

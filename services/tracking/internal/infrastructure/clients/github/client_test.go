@@ -1,14 +1,18 @@
 package github_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -258,4 +262,42 @@ func TestClient_circuitBreaker(t *testing.T) {
 		}
 		assert.Equal(t, int64(10), f.calls.Load())
 	})
+}
+
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(ctxlog.NewHandler(slog.NewJSONHandler(&buf, nil))))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestClient_circuitBreakerLogs(t *testing.T) {
+	logs := captureLogs(t)
+	f := newFake(t, status(500))
+	c := f.client("")
+	for range 3 {
+		require.ErrorIs(t, c.CheckRepository(context.Background(), "golang/go"), model.ErrGitHubUnavailable)
+	}
+
+	ctx := ctxlog.WithRequestID(context.Background(), "req-77")
+	require.ErrorIs(t, c.CheckRepository(ctx, "golang/go"), model.ErrGitHubUnavailable)
+
+	var change, rejected map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte{10}) {
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal(line, &rec))
+		switch rec["msg"] {
+		case "circuit breaker state changed":
+			change = rec
+		case "circuit breaker rejected a call to github":
+			rejected = rec
+		}
+	}
+	require.NotNil(t, change, "opening the breaker is logged")
+	assert.Equal(t, "open", change["to"])
+	assert.Equal(t, "system", change["initiator"], "a state change is a system event")
+	require.NotNil(t, rejected, "a rejected call is logged")
+	assert.Equal(t, "req-77", rejected["request_id"], "the rejected call carries the request_id")
 }

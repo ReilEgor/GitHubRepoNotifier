@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ReilEgor/GitHubRepoNotifier/shared/ctxlog"
 	"github.com/sony/gobreaker/v2"
 
 	"github.com/ReilEgor/GitHubRepoNotifier/services/tracking/internal/domain/model"
@@ -90,8 +91,10 @@ func NewClient(cfg Config) *Client {
 		ReadyToTrip: func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= breakerFailures },
 		// Only an exhausted series is a failure: a 404 or a rate limit answer proves GitHub is up.
 		IsSuccessful: func(err error) bool { return err == nil || !errors.Is(err, model.ErrGitHubUnavailable) },
+		// A state change belongs to no request, so it is logged as a system event.
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			slog.Warn("circuit breaker state changed",
+			slog.LogAttrs(ctxlog.WithInitiator(context.Background(), ctxlog.InitiatorSystem), slog.LevelWarn,
+				"circuit breaker state changed",
 				slog.String("breaker", name), slog.String("from", from.String()), slog.String("to", to.String()))
 		},
 	})
@@ -156,6 +159,9 @@ func statusError(r response) error {
 func (c *Client) request(ctx context.Context, method, path string) (response, error) {
 	resp, err := c.breaker.Execute(func() (response, error) { return c.series(ctx, method, path) })
 	if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+		// The rejected request is logged with its own context, so it carries the request_id.
+		slog.WarnContext(ctx, "circuit breaker rejected a call to github",
+			slog.String("method", method), slog.String("path", path), slog.String("state", c.breaker.State().String()))
 		return response{}, fmt.Errorf("circuit breaker: %w", model.ErrGitHubUnavailable)
 	}
 	if err != nil {

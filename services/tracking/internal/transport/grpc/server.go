@@ -78,7 +78,7 @@ func toStatus(err error) error {
 
 // NewGRPCServer returns a grpc.Server that checks the API key and puts the request ID into the context.
 func NewGRPCServer(apiKey string, srv *Server) *grpc.Server {
-	g := grpc.NewServer(grpc.ChainUnaryInterceptor(requestContext, authenticate(apiKey), logErrors))
+	g := grpc.NewServer(grpc.ChainUnaryInterceptor(requestContext, logCalls, authenticate(apiKey)))
 	pb.RegisterTrackingServiceServer(g, srv)
 	return g
 }
@@ -108,26 +108,31 @@ func authenticate(apiKey string) grpc.UnaryServerInterceptor {
 	}
 }
 
-// logErrors is the single place where a failed call is logged.
-func logErrors(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+// logCalls writes one record when a call completes, so a request reads as a path through the log by its request_id.
+// It is also the single place where a failed call is logged; it sits before authentication so rejected keys are seen.
+func logCalls(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	start := time.Now()
 	resp, err := handler(ctx, req)
-	if err != nil {
-		level := slog.LevelWarn
-		switch status.Code(err) {
-		case codes.Internal, codes.Unavailable, codes.ResourceExhausted, codes.DeadlineExceeded:
-			level = slog.LevelError
-		case codes.OK, codes.Canceled, codes.Unknown, codes.InvalidArgument, codes.NotFound, codes.AlreadyExists,
-			codes.PermissionDenied, codes.FailedPrecondition, codes.Aborted, codes.OutOfRange, codes.Unimplemented,
-			codes.DataLoss, codes.Unauthenticated:
-		}
-		slog.Log(
-			ctx,
-			level,
-			"grpc call failed",
-			slog.String("method", info.FullMethod),
-			slog.String("error", err.Error()),
-		)
+
+	attrs := []slog.Attr{
+		slog.String("method", info.FullMethod),
+		slog.String("code", status.Code(err).String()),
+		slog.Duration("duration", time.Since(start)),
 	}
+	if err == nil {
+		slog.LogAttrs(ctx, slog.LevelInfo, "grpc call completed", attrs...)
+		return resp, nil
+	}
+
+	level := slog.LevelWarn
+	switch status.Code(err) {
+	case codes.Internal, codes.Unavailable, codes.ResourceExhausted, codes.DeadlineExceeded:
+		level = slog.LevelError
+	case codes.OK, codes.Canceled, codes.Unknown, codes.InvalidArgument, codes.NotFound, codes.AlreadyExists,
+		codes.PermissionDenied, codes.FailedPrecondition, codes.Aborted, codes.OutOfRange, codes.Unimplemented,
+		codes.DataLoss, codes.Unauthenticated:
+	}
+	slog.LogAttrs(ctx, level, "grpc call failed", append(attrs, slog.String("error", err.Error()))...)
 	return resp, err //nolint:wrapcheck // a gRPC status must reach the client unchanged.
 }
 
