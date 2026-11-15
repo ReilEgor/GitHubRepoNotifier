@@ -418,10 +418,23 @@ cmd_e2e() {
 	step "install Playwright"
 	(cd e2e && npm ci --no-audit --no-fund)
 
+	fake_github_pid=""
 	trap 'kill "$fake_github_pid" 2>/dev/null || true; stack_down' EXIT INT TERM
 	step "start the fake GitHub on :$E2E_GITHUB_PORT"
+	# bin/ does not exist on a clean checkout until the services are built; the log would fail to open and node would not start.
+	mkdir -p "$BIN"
 	E2E_GITHUB_PORT=$E2E_GITHUB_PORT node e2e/fake-github.mjs >"$BIN/fake-github.log" 2>&1 &
 	fake_github_pid=$!
+	tries=0
+	until fetch "http://127.0.0.1:$E2E_GITHUB_PORT/__calls" >/dev/null 2>&1; do
+		tries=$((tries + 1))
+		if [ "$tries" -ge 20 ]; then
+			echo "error: the fake GitHub did not start; log:" >&2
+			cat "$BIN/fake-github.log" >&2
+			exit 1
+		fi
+		sleep 0.5
+	done
 
 	# Every test sends its own X-Forwarded-For, so the tests do not share a rate limit; 127.0.0.1 is the trusted proxy.
 	STACK_GITHUB_API_URL="http://127.0.0.1:$E2E_GITHUB_PORT" STACK_RATE_LIMIT=5-M STACK_TRUSTED_PROXIES=127.0.0.1 stack_up
