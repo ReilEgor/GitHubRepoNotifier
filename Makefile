@@ -3,6 +3,7 @@
 
 GOLANGCI_LINT_VERSION := v2.12.1
 GO_ARCH_LINT_VERSION  := v1.15.0
+GREMLINS_VERSION      := v0.6.0
 WIRE_VERSION          := v0.7.0
 PROTOC_GEN_GO_VERSION := v1.36.11
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.1
@@ -10,7 +11,7 @@ BUF_VERSION           := v1.71.0
 
 CHECK := sh scripts/check.sh
 
-.PHONY: help setup fmt fmt-check lint arch unit test-integration test build generate generate-check smoke check run-subscription run-tracking run-notification clean
+.PHONY: help setup fmt fmt-check lint arch unit test-integration test build generate generate-check smoke e2e cover cover-unit mutation check run-subscription run-tracking run-notification clean
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed -E 's/:.*## /\t/' | awk -F '\t' '{ printf "  %-18s %s\n", $$1, $$2 }'
@@ -19,6 +20,7 @@ setup: ## Install pinned tools and enable git hooks
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	go install github.com/fe3dback/go-arch-lint@$(GO_ARCH_LINT_VERSION)
 	go install github.com/google/wire/cmd/wire@$(WIRE_VERSION)
+	go install github.com/go-gremlins/gremlins/cmd/gremlins@$(GREMLINS_VERSION)
 	go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
@@ -57,6 +59,18 @@ generate-check: ## Fail if generated code is out of date
 
 smoke: ## Docker Compose smoke test: migrations, services, subscribe-confirm-list-unsubscribe (needs Docker, runs in CI)
 	@$(CHECK) smoke
+
+e2e: ## Playwright tests against the whole system on Docker Compose (needs Docker and Node.js)
+	@$(CHECK) e2e
+
+cover: ## Statement coverage per package from unit + integration tests (needs Docker); COVER_MIN=80 fails below 80%
+	@$(CHECK) cover
+
+cover-unit: ## Statement coverage per package from unit tests only (no Docker)
+	@$(CHECK) cover-unit
+
+mutation: ## Mutation testing with gremlins on the critical packages; reports in reports/mutation
+	@$(CHECK) mutation
 
 check: fmt-check lint arch unit build ## Run everything the hooks run (no Docker)
 

@@ -39,6 +39,13 @@ func ParseRate(s string) (limit int64, window time.Duration, err error) {
 	return limit, window, nil
 }
 
+// NewClient returns the Redis client the limiter must run on. ContextTimeoutEnabled is required:
+// without it go-redis ignores the context deadline, so redisTimeout would not apply and an unresponsive
+// Redis would hold every API request for the client's own read timeout.
+func NewClient(addr, password string) *redis.Client {
+	return redis.NewClient(&redis.Options{Addr: addr, Password: password, ContextTimeoutEnabled: true, MaxRetries: -1})
+}
+
 // Redis is a fixed-window limiter backed by Redis.
 type Redis struct {
 	client redis.Cmdable

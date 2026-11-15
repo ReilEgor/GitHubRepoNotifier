@@ -1,0 +1,196 @@
+[
+ {
+  "id": "B01",
+  "desc": "re-subscribing a confirmed pair queues a new confirmation email and saga",
+  "file": "services/subscription/internal/usecase/subscription_usecase.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestSubscriptionUseCase_Subscribe",
+   "TestSubscriptionUseCase_Subscribe/success_-_confirmed_pair_changes_nothing"
+  ]
+ },
+ {
+  "id": "B02",
+  "desc": "confirm publishes the activation event to the wrong queue",
+  "file": "services/subscription/internal/usecase/subscription_usecase.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestSubscriptionUseCase_Confirm",
+   "TestSubscriptionUseCase_Confirm/success_-_subscription_confirmed_and_event_queued"
+  ]
+ },
+ {
+  "id": "B03",
+  "desc": "unsubscribe swallows the error of Delete (double unsubscribe succeeds)",
+  "file": "services/subscription/internal/usecase/subscription_usecase.go",
+  "unit": "pass",
+  "integration": "pass",
+  "e2e": "pass",
+  "caught_by": "NOTHING"
+ },
+ {
+  "id": "B04",
+  "desc": "a confirmed subscription gets a new token on re-subscribe",
+  "file": "services/subscription/internal/repository/postgres/subscription_repository.go",
+  "unit": "pass",
+  "integration": "FAIL",
+  "caught_by": "integration",
+  "tests": [
+   "TestSubscribe",
+   "TestSubscribe/success_-_confirmed_pair_changes_nothing"
+  ]
+ },
+ {
+  "id": "B05",
+  "desc": "Confirm does not notice that no row was changed",
+  "file": "services/subscription/internal/repository/postgres/subscription_repository.go",
+  "unit": "pass",
+  "integration": "pass",
+  "e2e": "pass",
+  "caught_by": "NOTHING"
+ },
+ {
+  "id": "B06",
+  "desc": "Delete does not notice that no row was deleted",
+  "file": "services/subscription/internal/repository/postgres/subscription_repository.go",
+  "unit": "pass",
+  "integration": "pass",
+  "e2e": "pass",
+  "caught_by": "NOTHING"
+ },
+ {
+  "id": "B07",
+  "desc": "the list is oldest first instead of newest first",
+  "file": "services/subscription/internal/repository/postgres/subscription_repository.go",
+  "unit": "pass",
+  "integration": "FAIL",
+  "caught_by": "integration",
+  "tests": [
+   "TestList",
+   "TestList/success_-_subscriptions_of_the_user,_newest_first,_without_tokens"
+  ]
+ },
+ {
+  "id": "B08",
+  "desc": "API key check accepts any header that starts with the key",
+  "file": "services/subscription/internal/transport/http/middleware/request.go",
+  "unit": "pass",
+  "integration": "pass",
+  "e2e": "pass",
+  "caught_by": "NOTHING"
+ },
+ {
+  "id": "B09",
+  "desc": "rate limiter fails closed instead of open when Redis is down",
+  "file": "services/subscription/internal/transport/http/middleware/ratelimit.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestRateLimit",
+   "TestRateLimit/success_-_limiter_failure_lets_the_request_through"
+  ]
+ },
+ {
+  "id": "B10",
+  "desc": "the GitHub rate limit of tracking is no longer translated to 503",
+  "file": "services/subscription/internal/infrastructure/adapter/tracking_client.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestTrackingClient_GetOrCreateRepository",
+   "TestTrackingClient_GetOrCreateRepository/error_-_rate_limit"
+  ]
+ },
+ {
+  "id": "B11",
+  "desc": "GitHub rate limit is reported as Unavailable instead of ResourceExhausted",
+  "file": "services/tracking/internal/transport/grpc/server.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestServer_GetOrCreateRepository",
+   "TestServer_GetOrCreateRepository/error_-_rate_limit"
+  ]
+ },
+ {
+  "id": "B12",
+  "desc": "a new repository is stored without its latest tag",
+  "file": "services/tracking/internal/usecase/repository_usecase.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestServer_GetOrCreateRepository",
+   "TestServer_GetOrCreateRepository/success_-_existing_repository",
+   "TestRepositoryUseCase_GetOrCreate",
+   "TestRepositoryUseCase_GetOrCreate/success_-_unknown_repository_is_verified_and_stored"
+  ]
+ },
+ {
+  "id": "B13",
+  "desc": "existence of the repository is not checked before reading its release",
+  "file": "services/tracking/internal/usecase/repository_usecase.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestServer_GetOrCreateRepository",
+   "TestServer_GetOrCreateRepository/error_-_repository_not_found",
+   "TestServer_GetOrCreateRepository/error_-_github_unavailable",
+   "TestServer_GetOrCreateRepository/error_-_rate_limit",
+   "TestServer_GetOrCreateRepository/error_-_timeout",
+   "TestServer_logsEveryCallWithRequestID"
+  ]
+ },
+ {
+  "id": "B14",
+  "desc": "parallel registration of one repository fails (DO NOTHING returns no row)",
+  "file": "services/tracking/internal/repository/postgres/repository_repository.go",
+  "unit": "pass",
+  "integration": "FAIL",
+  "caught_by": "integration",
+  "tests": [
+   "TestGetOrCreateRepository",
+   "TestGetOrCreateRepository/success_-_parallel_requests_for_one_new_repository_give_one_row_and_one_id",
+   "TestRepositoryRepository_Create",
+   "TestRepositoryRepository_Create/success_-_creating_an_existing_repository_returns_it_unchanged"
+  ]
+ },
+ {
+  "id": "B15",
+  "desc": "the Redis client ignores the context deadline again",
+  "file": "services/subscription/internal/infrastructure/ratelimit/ratelimit.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": [
+   "TestRedis_Allow_failures",
+   "TestRedis_Allow_failures/error_-_unresponsive_redis_fails_fast_instead_of_holding_the_request"
+  ]
+ },
+ {
+  "id": "B16",
+  "desc": "the 254-character limit of an email address is not enforced",
+  "file": "services/subscription/internal/transport/http/handler.go",
+  "unit": "pass",
+  "integration": "pass",
+  "e2e": "pass",
+  "caught_by": "NOTHING"
+ },
+ {
+  "id": "B17",
+  "desc": "a repository name part may be 10000 characters long",
+  "file": "services/subscription/internal/transport/http/handler.go",
+  "unit": "FAIL",
+  "caught_by": "unit",
+  "tests": []
+ },
+ {
+  "id": "B18",
+  "desc": "the confirmation command loses the request id (broken log trace)",
+  "file": "services/subscription/internal/usecase/subscription_usecase.go",
+  "unit": "pass",
+  "integration": "pass",
+  "e2e": "pass",
+  "caught_by": "NOTHING"
+ }
+]

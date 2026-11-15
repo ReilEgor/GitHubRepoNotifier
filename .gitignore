@@ -7,3 +7,7 @@
 *.out
 coverage.txt
 .obsidian/
+/reports/
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/

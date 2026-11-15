@@ -11,9 +11,13 @@ import (
 	"testing"
 
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/storage/postgres/pgtest"
+	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/storage/redistest"
 )
 
-var server *pgtest.Server
+var (
+	server      *pgtest.Server
+	redisServer *redistest.Server
+)
 
 func TestMain(m *testing.M) {
 	srv, err := pgtest.Start(context.Background())
@@ -22,9 +26,20 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	server = srv
-	code := m.Run()
-	if err := srv.Stop(); err != nil {
+	redisSrv, err := redistest.Start(context.Background())
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if stopErr := srv.Stop(); stopErr != nil {
+			fmt.Fprintln(os.Stderr, stopErr)
+		}
+		os.Exit(1)
+	}
+	redisServer = redisSrv
+	code := m.Run()
+	for _, stop := range []func() error{srv.Stop, redisSrv.Stop} {
+		if err := stop(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 	}
 	os.Exit(code)
 }
