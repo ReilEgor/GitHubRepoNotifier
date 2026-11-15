@@ -2,12 +2,19 @@
 # Single entry point for every project check.
 # The Makefile, the git hooks and CI all call this script, so they run exactly the same commands.
 #
-# Usage: sh scripts/check.sh <fmt|fmt-check|lint|arch|unit|integration|test|build|generate|generate-check|smoke>
+# Usage: sh scripts/check.sh <fmt|fmt-check|lint|arch|unit|integration|test|cover|cover-unit|mutation|build|generate|generate-check|smoke|e2e>
 #
 #   unit        fast tests, no Docker
 #   integration tests on a real PostgreSQL started by Testcontainers (needs Docker)
 #   test        unit + integration
 #   smoke       Docker Compose: PostgreSQL, Redis, migrations, the services, and the user flow through the API
+#   cover       statement coverage per package from unit + integration tests (needs Docker)
+#   cover-unit  the same from unit tests only
+#   mutation    mutation testing with gremlins on the critical packages; reports go to reports/mutation
+#   e2e         Playwright tests against the whole system started like the smoke test (needs Docker, Node.js)
+#
+# Variables: COVER_MODULES (modules to measure), COVER_MIN (fail below this percent of a module),
+#            MUTATION_TARGETS ("module:package ..."), MUTATION_WORKERS, MUTATION_MIN_EFFICACY, MUTATION_FLAGS.
 
 set -eu
 
@@ -19,6 +26,22 @@ INTEGRATION_MODULES="shared services/subscription services/tracking"
 SERVICES="subscription tracking notification"
 BUILDINFO=github.com/ReilEgor/GitHubRepoNotifier/shared/buildinfo
 BIN=bin
+
+COVER_MODULES=${COVER_MODULES:-$INTEGRATION_MODULES}
+COVER_MIN=${COVER_MIN:-0}
+COVER_DIR=reports/coverage
+
+# Packages whose logic matters most; each entry is module:package[:excluded-files-regexp]. gremlins walks into
+# subdirectories, so a package whose subpackage has its own entry excludes it.
+MUTATION_TARGETS=${MUTATION_TARGETS:-"services/subscription:./internal/infrastructure/ratelimit services/subscription:./internal/usecase services/subscription:./internal/transport/http:middleware services/subscription:./internal/transport/http/middleware services/tracking:./internal/usecase services/tracking:./internal/transport/grpc services/tracking:./internal/infrastructure/clients/github"}
+MUTATION_DIR=reports/mutation
+# One worker and a long timeout: on a loaded machine (and always on Windows) parallel mutants time out, which gremlins reports as a lost mutant.
+MUTATION_WORKERS=${MUTATION_WORKERS:-1}
+MUTATION_TIMEOUT_COEFFICIENT=${MUTATION_TIMEOUT_COEFFICIENT:-20}
+MUTATION_MIN_EFFICACY=${MUTATION_MIN_EFFICACY:-0}
+# The default mutators of gremlins (comparisons, arithmetic, ++/--) miss most of the logic of a Go service; these add
+# && / || swaps, break/continue swaps and inverted assignments.
+MUTATION_FLAGS=${MUTATION_FLAGS:---invert-logical --invert-loopctrl --invert-assignments}
 
 # Generated code that must match its source; generate-check fails when it does not.
 GENERATED="shared/infrastructure/grpc services/subscription/cmd/subscription/wire_gen.go services/tracking/cmd/tracking/wire_gen.go"
@@ -147,8 +170,10 @@ fetch() { curl -fsS --max-time 3 "$1"; }
 
 compose() { docker compose -p "$SMOKE_PROJECT" "$@"; }
 
-smoke_cleanup() {
-	for p in $smoke_pids; do kill "$p" 2>/dev/null || true; done
+stack_pids=""
+
+stack_down() {
+	for p in $stack_pids; do kill "$p" 2>/dev/null || true; done
 	compose down --remove-orphans >/dev/null 2>&1 || true
 }
 
@@ -178,14 +203,16 @@ expect_status() {
 	echo "$desc -> $got"
 }
 
-cmd_smoke() {
+# stack_up builds and starts the whole system on the smoke ports and waits until every service is healthy.
+# The caller sets a trap on stack_down. Optional settings, passed to the services when set:
+#   STACK_GITHUB_API_URL  where tracking asks for repositories (default: GitHub; the seed makes golang/go known without it)
+#   STACK_RATE_LIMIT, STACK_TRUSTED_PROXIES  the rate limit settings of subscription
+stack_up() {
 	need curl
 	need docker
 	cmd_build
 	version=$(commit)
 	ext=$(go env GOEXE)
-	smoke_pids=""
-	trap smoke_cleanup EXIT INT TERM
 
 	step "start PostgreSQL and Redis"
 	compose up -d --wait postgres-subscription postgres-tracker redis
@@ -200,18 +227,21 @@ cmd_smoke() {
 	redis_env="REDIS_HOST=127.0.0.1 REDIS_PORT=16379"
 	# shellcheck disable=SC2086
 	env $redis_env APP_API_KEY="$SMOKE_API_KEY" DB_URL="$SMOKE_DB_tracking" APP_GRPC_PORT="$SMOKE_GRPC_PORT" \
-		WORKER_HEALTH_PORT="$SMOKE_PORT_tracking" "$BIN/tracking$ext" >"$BIN/tracking.smoke.log" 2>&1 &
-	smoke_pids="$smoke_pids $!"
+		WORKER_HEALTH_PORT="$SMOKE_PORT_tracking" ${STACK_GITHUB_API_URL:+GITHUB_API_URL="$STACK_GITHUB_API_URL"} \
+		"$BIN/tracking$ext" >"$BIN/tracking.smoke.log" 2>&1 &
+	stack_pids="$stack_pids $!"
 	# shellcheck disable=SC2086
 	env $redis_env APP_API_KEY="$SMOKE_API_KEY" DB_URL="$SMOKE_DB_subscription" APP_HTTP_PORT="$SMOKE_PORT_subscription" \
-		TRACKING_GRPC_ADDR="127.0.0.1:$SMOKE_GRPC_PORT" "$BIN/subscription$ext" >"$BIN/subscription.smoke.log" 2>&1 &
-	smoke_pids="$smoke_pids $!"
+		TRACKING_GRPC_ADDR="127.0.0.1:$SMOKE_GRPC_PORT" ${STACK_RATE_LIMIT:+RATE_LIMIT="$STACK_RATE_LIMIT"} \
+		${STACK_TRUSTED_PROXIES:+TRUSTED_PROXIES="$STACK_TRUSTED_PROXIES"} \
+		"$BIN/subscription$ext" >"$BIN/subscription.smoke.log" 2>&1 &
+	stack_pids="$stack_pids $!"
 	SENDER_HEALTH_PORT="$SMOKE_PORT_notification" "$BIN/notification$ext" >"$BIN/notification.smoke.log" 2>&1 &
-	smoke_pids="$smoke_pids $!"
+	stack_pids="$stack_pids $!"
 
 	for s in $SERVICES; do
 		eval "port=\$SMOKE_PORT_$s"
-		step "smoke $s on :$port"
+		step "wait for $s on :$port"
 		wait_healthy "$s" "$port"
 		echo "/health  -> 200"
 
@@ -224,6 +254,11 @@ cmd_smoke() {
 			;;
 		esac
 	done
+}
+
+cmd_smoke() {
+	trap stack_down EXIT INT TERM
+	stack_up
 
 	step "user flow: subscribe, confirm, list, unsubscribe"
 	api="http://127.0.0.1:$SMOKE_PORT_subscription/api/v1"
@@ -260,6 +295,145 @@ cmd_smoke() {
 	step "smoke passed"
 }
 
+# cover_run TAGS: measures every module in COVER_MODULES. -coverpkg=./... counts a package as covered by the tests
+# of any other package, so the integration tests and the handler tests count towards the code they exercise.
+# Generated code, wiring (cmd/), test helpers and mocks are left out of the numbers.
+cover_run() {
+	tags=$1
+	mkdir -p "$COVER_DIR"
+	failed=""
+	for m in $COVER_MODULES; do
+		step "coverage $m${tags:+ (tags: $tags)}"
+		name=$(echo "$m" | tr / -)
+		profile="$ROOT/$COVER_DIR/$name.out"
+		# shellcheck disable=SC2086
+		(cd "$m" && go test -count=1 ${tags:+-tags $tags} -coverpkg=./... -coverprofile="$profile" ./... >/dev/null) || {
+			echo "error: tests of $m failed; run 'make unit' to see why" >&2
+			exit 1
+		}
+		modpath=$(awk '$1 == "module" { print $2 }' "$m/go.mod")
+		cover_report "$profile" "$modpath" "$COVER_DIR/$name.total"
+		if awk -v p="$(cat "$COVER_DIR/$name.total")" -v min="$COVER_MIN" 'BEGIN { exit !(p + 0 < min + 0) }'; then
+			failed="$failed $m"
+		fi
+	done
+	if [ -n "$failed" ]; then
+		echo "error: coverage is below ${COVER_MIN}% in:$failed" >&2
+		exit 1
+	fi
+	echo
+	echo "profiles: $COVER_DIR/*.out; per function: go tool cover -func=<profile>; in a browser: go tool cover -html=<profile>"
+}
+
+# cover_report PROFILE MODULE_PATH TOTAL_FILE: prints statement coverage per package and writes the module total
+# (a bare percent) to TOTAL_FILE.
+cover_report() {
+	awk -v mod="$2/" -v totalfile="$3" '
+		NR == 1 { next }
+		# Every test binary reports every block of -coverpkg: a block counts once, covered if any binary ran it.
+		{
+			block = $1
+			stmtsOf[block] = $2
+			if ($3 > 0) hitBlock[block] = 1
+		}
+		END {
+			for (block in stmtsOf) {
+				split(block, a, ":")
+				file = a[1]
+				if (file ~ /\.pb\.go$/ || file ~ /_gen\.go$/ || file ~ /\/cmd\// || file ~ /\/mocks\// || file ~ /\/pgtest\// || file ~ /\/redistest\//) continue
+				sub(mod, "", file)
+				n = split(file, parts, "/")
+				pkg = ""
+				for (i = 1; i < n; i++) pkg = pkg (i > 1 ? "/" : "") parts[i]
+				if (pkg == "") pkg = "."
+				stmts[pkg] += stmtsOf[block]
+				all += stmtsOf[block]
+				if (block in hitBlock) {
+					cov[pkg] += stmtsOf[block]
+					hit += stmtsOf[block]
+				}
+			}
+			# Insertion sort by package name: no dependence on sort(1), whose Windows namesake ignores the options.
+			count = 0
+			for (p in stmts) {
+				i = ++count
+				while (i > 1 && names[i - 1] > p) { names[i] = names[i - 1]; i-- }
+				names[i] = p
+			}
+			for (i = 1; i <= count; i++) {
+				p = names[i]
+				printf "  %6.1f%%  %5d/%-5d  %s\n", 100 * cov[p] / stmts[p], cov[p], stmts[p], p
+			}
+			total = (all ? 100 * hit / all : 0)
+			printf "  %6.1f%%  %5d/%-5d  TOTAL\n", total, hit, all
+			printf "%.1f\n", total > totalfile
+		}
+	' "$1"
+}
+
+cmd_cover() {
+	need docker
+	docker info >/dev/null 2>&1 || {
+		echo "error: Docker is not running; use 'cover-unit' for unit tests only" >&2
+		exit 1
+	}
+	if [ "$(go env GOOS)" = windows ]; then
+		export TESTCONTAINERS_RYUK_DISABLED=true
+	fi
+	cover_run integration
+}
+
+cmd_cover_unit() {
+	cover_run ""
+}
+
+cmd_mutation() {
+	need gremlins
+	mkdir -p "$ROOT/$MUTATION_DIR"
+	failed=""
+	for target in $MUTATION_TARGETS; do
+		m=${target%%:*}
+		rest=${target#*:}
+		pkg=${rest%%:*}
+		exclude=""
+		case "$rest" in *:*) exclude=${rest#*:} ;; esac
+		name=$(echo "$m-$pkg" | tr -c 'A-Za-z0-9\n' - | sed 's/--*/-/g; s/-$//')
+		step "mutation $m $pkg"
+		# shellcheck disable=SC2086
+		(cd "$m" && gremlins unleash "$pkg" ${exclude:+-E "$exclude"} $MUTATION_FLAGS --workers "$MUTATION_WORKERS" \
+			--timeout-coefficient "$MUTATION_TIMEOUT_COEFFICIENT" --output "$ROOT/$MUTATION_DIR/$name.json" \
+			--threshold-efficacy "$MUTATION_MIN_EFFICACY") || failed="$failed $m:$pkg"
+	done
+	if [ -n "$failed" ]; then
+		echo "error: test efficacy is below ${MUTATION_MIN_EFFICACY}% in:$failed" >&2
+		exit 1
+	fi
+}
+
+E2E_GITHUB_PORT=18099
+
+cmd_e2e() {
+	need node
+	need npm
+	step "install Playwright"
+	(cd e2e && npm ci --no-audit --no-fund)
+
+	trap 'kill "$fake_github_pid" 2>/dev/null || true; stack_down' EXIT INT TERM
+	step "start the fake GitHub on :$E2E_GITHUB_PORT"
+	E2E_GITHUB_PORT=$E2E_GITHUB_PORT node e2e/fake-github.mjs >"$BIN/fake-github.log" 2>&1 &
+	fake_github_pid=$!
+
+	# Every test sends its own X-Forwarded-For, so the tests do not share a rate limit; 127.0.0.1 is the trusted proxy.
+	STACK_GITHUB_API_URL="http://127.0.0.1:$E2E_GITHUB_PORT" STACK_RATE_LIMIT=5-M STACK_TRUSTED_PROXIES=127.0.0.1 stack_up
+
+	step "run the Playwright tests"
+	(cd e2e && \
+		E2E_BASE_URL="http://127.0.0.1:$SMOKE_PORT_subscription" E2E_API_KEY="$SMOKE_API_KEY" \
+		E2E_GITHUB_URL="http://127.0.0.1:$E2E_GITHUB_PORT" E2E_RATE_LIMIT=5 \
+		E2E_SUBSCRIPTION_DB="$SMOKE_DB_subscription" E2E_TRACKING_DB="$SMOKE_DB_tracking" \
+		npx playwright test)
+}
+
 case "${1:-}" in
 fmt) cmd_fmt ;;
 fmt-check) cmd_fmt_check ;;
@@ -272,8 +446,12 @@ build) cmd_build ;;
 generate) cmd_generate ;;
 generate-check) cmd_generate_check ;;
 smoke) cmd_smoke ;;
+cover) cmd_cover ;;
+cover-unit) cmd_cover_unit ;;
+mutation) cmd_mutation ;;
+e2e) cmd_e2e ;;
 *)
-	echo "usage: sh scripts/check.sh <fmt|fmt-check|lint|arch|unit|integration|test|build|generate|generate-check|smoke>" >&2
+	echo "usage: sh scripts/check.sh <fmt|fmt-check|lint|arch|unit|integration|test|cover|cover-unit|mutation|build|generate|generate-check|smoke|e2e>" >&2
 	exit 2
 	;;
 esac
