@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -21,6 +23,7 @@ import (
 	"github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/domain/model"
 	"github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/repository/postgres"
 	httptransport "github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/transport/http"
+	"github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/transport/http/middleware"
 	"github.com/ReilEgor/GitHubRepoNotifier/services/subscription/internal/usecase"
 )
 
@@ -74,6 +77,12 @@ type option func(*usecaseRepos)
 
 func newEnv(t *testing.T, res resolver, seed bool, opts ...option) env {
 	t.Helper()
+	return newEnvLimited(t, res, seed, allowAll{}, opts...)
+}
+
+// newEnvLimited is newEnv with the given rate limiter in front of the API.
+func newEnvLimited(t *testing.T, res resolver, seed bool, limiter middleware.Limiter, opts ...option) env {
+	t.Helper()
 
 	seedPath := ""
 	if seed {
@@ -95,7 +104,7 @@ func newEnv(t *testing.T, res resolver, seed bool, opts ...option) env {
 	uc := usecase.NewSubscriptionUseCase(sharedPostgres.NewTransactor(pool), repos, res)
 	router, err := httptransport.NewRouter(
 		httptransport.NewHandler(uc),
-		allowAll{},
+		limiter,
 		apiKey,
 		nil,
 		http.NotFoundHandler(),
@@ -108,6 +117,19 @@ func (e env) do(method, target, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequestWithContext(context.Background(), method, target, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", apiKey)
+	rec := httptest.NewRecorder()
+	e.router.ServeHTTP(rec, req)
+	return rec
+}
+
+// request sends a request with full control of the headers and of the caller address.
+func (e env) request(method, target, body, remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequestWithContext(context.Background(), method, target, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = remoteAddr
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
 	return rec
@@ -147,4 +169,11 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &m))
 	return m
+}
+
+// closeQuietly closes c and only logs a failure: a cleanup error must not fail a test that already has its result.
+func closeQuietly(c io.Closer) {
+	if err := c.Close(); err != nil {
+		slog.Debug("close", slog.String("error", err.Error()))
+	}
 }
