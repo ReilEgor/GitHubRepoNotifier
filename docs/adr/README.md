@@ -12,3 +12,4 @@
 | [0006](0006-dependencies-through-wire-and-request-context.md) | Залежності збирає wire, а ID процесу й ініціатор живуть у контексті | accepted |
 | [0007](0007-transaction-boundary-through-transactor.md) | Сценарій оголошує межу транзакції через Transactor | accepted |
 | [0008](0008-environment-and-integration-tests.md) | Три рівні перевірок: швидкі, інтеграційні й smoke із Docker Compose | accepted |
+| [0009](0009-behavior-tests-mutation-and-e2e.md) | Тести перевіряють поведінку; якість міряють покриттям і мутаціями; E2E на Playwright | accepted |
