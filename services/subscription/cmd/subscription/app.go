@@ -11,7 +11,6 @@ import (
 	"github.com/ReilEgor/GitHubRepoNotifier/shared/infrastructure/probe"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -63,10 +62,7 @@ func provideLimiter(cfg Config) (middleware.Limiter, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("rate limit: %w", err)
 	}
-	client := redis.NewClient(&redis.Options{
-		Addr:     net.JoinHostPort(cfg.RedisHost, cfg.RedisPort),
-		Password: cfg.RedisPassword,
-	})
+	client := ratelimit.NewClient(net.JoinHostPort(cfg.RedisHost, cfg.RedisPort), cfg.RedisPassword)
 	return ratelimit.NewRedis(client, limit, window), func() {
 		if err := client.Close(); err != nil {
 			slog.Warn("close redis client", slog.String("error", err.Error()))

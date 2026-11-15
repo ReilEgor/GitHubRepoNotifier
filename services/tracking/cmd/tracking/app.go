@@ -47,6 +47,8 @@ func provideRedis(cfg Config) (redis.Cmdable, func()) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     net.JoinHostPort(cfg.RedisHost, cfg.RedisPort),
 		Password: cfg.RedisPassword,
+		// Without it go-redis ignores the context deadline, so the cache timeouts would not apply.
+		ContextTimeoutEnabled: true,
 	})
 	return client, func() {
 		if err := client.Close(); err != nil {
