@@ -93,7 +93,14 @@ func newEnv(t *testing.T, res resolver, seed bool, opts ...option) env {
 		o(&repos)
 	}
 	uc := usecase.NewSubscriptionUseCase(sharedPostgres.NewTransactor(pool), repos, res)
-	router := httptransport.NewRouter(httptransport.NewHandler(uc), allowAll{}, apiKey, http.NotFoundHandler())
+	router, err := httptransport.NewRouter(
+		httptransport.NewHandler(uc),
+		allowAll{},
+		apiKey,
+		nil,
+		http.NotFoundHandler(),
+	)
+	require.NoError(t, err)
 	return env{pool: pool, uc: uc, router: router, queries: counter}
 }
 

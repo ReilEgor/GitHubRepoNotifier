@@ -10,4 +10,7 @@ type Config struct {
 	RedisPort        string `env:"REDIS_PORT"           envDefault:"6379"`
 	RedisPassword    string `env:"REDIS_PASSWORD"`
 	RateLimit        string `env:"RATE_LIMIT"           envDefault:"10-S"`
+	// TrustedProxies lists the IPs or CIDRs of reverse proxies whose X-Forwarded-For is believed.
+	// Empty (the default) means none: the client address is the TCP peer.
+	TrustedProxies []string `env:"TRUSTED_PROXIES" envSeparator:","`
 }

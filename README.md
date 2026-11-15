@@ -269,6 +269,7 @@ curl http://localhost:8080/version    # {"version":"<хеш коміту>"}
 | `GITHUB_TOKEN` | tracking | порожньо; токен GitHub підвищує ліміт запитів до API |
 | `GITHUB_HTTP_TIMEOUT` | tracking | `3s`; час на одну спробу запиту до GitHub (спроб до трьох) |
 | `RATE_LIMIT` | subscription | `10-S`; ліміт запитів з однієї адреси (`S`, `M` або `H`) |
+| `TRUSTED_PROXIES` | subscription | порожньо; IP або CIDR зворотних проксі через кому, яким вірять `X-Forwarded-For`. Без них адреса клієнта — це TCP-з'єднання, і заголовком ліміт не обійти |
 
 Змінні, що з'являться разом із відповідним кодом:
 
@@ -320,4 +321,6 @@ curl http://localhost:8080/version    # {"version":"<хеш коміту>"}
 - [x] власні стандарти (`standards/`)
 - [x] `spec.md`: модулі, дані, сценарії
 - [x] аудит: відповідність структури до spec, топ-3 зайві залежності ([docs/audit.md](docs/audit.md))
-- [ ] pull request і `DEFENSE`
+- [x] pull request і `DEFENSE` — [DEFENSE-lab-1.md](DEFENSE-lab-1.md)
+
+Завдання 2 — «Сценарії на статичних даних, потім на БД»: [DEFENSE-lab-2.md](DEFENSE-lab-2.md).

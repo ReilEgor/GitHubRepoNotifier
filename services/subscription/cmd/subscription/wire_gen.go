@@ -50,7 +50,13 @@ func initApp(ctx context.Context, cfg Config) (*App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	engine := provideRouter(handler, limiter, cfg)
+	engine, err := provideRouter(handler, limiter, cfg)
+	if err != nil {
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	app := newApp(engine)
 	return app, func() {
 		cleanup3()

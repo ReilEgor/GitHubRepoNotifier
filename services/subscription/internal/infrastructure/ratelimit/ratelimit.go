@@ -56,15 +56,20 @@ func (r *Redis) Allow(ctx context.Context, key string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, redisTimeout)
 	defer cancel()
 
-	k := keyPrefix + key
-	n, err := r.client.Incr(ctx, k).Result()
+	n, err := incrWithTTL.Run(ctx, r.client, []string{keyPrefix + key}, r.window.Milliseconds()).Int64()
 	if err != nil {
 		return false, fmt.Errorf("ratelimit incr: %w", err)
 	}
-	if n == 1 {
-		if err := r.client.Expire(ctx, k, r.window).Err(); err != nil {
-			return false, fmt.Errorf("ratelimit expire: %w", err)
-		}
-	}
 	return n <= r.limit, nil
 }
+
+// incrWithTTL increments the counter and sets its TTL in one atomic step, so a failure
+// between the two can never leave a key without expiry. A key that already has no TTL
+// (left by an older version of this code) gets one on its next request.
+var incrWithTTL = redis.NewScript(`
+local n = redis.call('INCR', KEYS[1])
+if n == 1 or redis.call('PTTL', KEYS[1]) < 0 then
+	redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return n
+`)

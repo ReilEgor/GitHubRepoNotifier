@@ -68,6 +68,33 @@ func TestRedis_Allow(t *testing.T) {
 		assert.True(t, ok)
 	})
 
+	t.Run("success - the first request sets the TTL together with the counter", func(t *testing.T) {
+		mr := miniredis.RunT(t)
+		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Minute)
+
+		_, err := l.Allow(ctx, "1.2.3.4")
+
+		require.NoError(t, err)
+		assert.Equal(t, time.Minute, mr.TTL("ratelimit:1.2.3.4"))
+	})
+
+	t.Run("success - a key left without TTL is healed and expires", func(t *testing.T) {
+		mr := miniredis.RunT(t)
+		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Second)
+		require.NoError(t, mr.Set("ratelimit:1.2.3.4", "3")) // the old INCR-then-EXPIRE failure: counter, no TTL
+		require.Zero(t, mr.TTL("ratelimit:1.2.3.4"))
+
+		ok, err := l.Allow(ctx, "1.2.3.4")
+		require.NoError(t, err)
+		assert.False(t, ok)
+		assert.Equal(t, time.Second, mr.TTL("ratelimit:1.2.3.4"))
+
+		mr.FastForward(2 * time.Second)
+		ok, err = l.Allow(ctx, "1.2.3.4")
+		require.NoError(t, err)
+		assert.True(t, ok, "the address is not blocked forever")
+	})
+
 	t.Run("error - redis down", func(t *testing.T) {
 		mr := miniredis.RunT(t)
 		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Second)

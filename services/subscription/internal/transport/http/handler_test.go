@@ -41,7 +41,8 @@ type app struct {
 	repos  usecase.Repositories
 }
 
-func newApp(res resolver) app {
+func newApp(t *testing.T, res resolver) app {
+	t.Helper()
 	store := memory.NewStore()
 	repos := usecase.Repositories{
 		Repositories:  memory.NewRepositoryRepository(store),
@@ -52,7 +53,9 @@ func newApp(res resolver) app {
 	}
 	uc := usecase.NewSubscriptionUseCase(store, repos, res)
 	probe := http.NotFoundHandler()
-	return app{router: httptransport.NewRouter(httptransport.NewHandler(uc), allowAll{}, apiKey, probe), repos: repos}
+	router, err := httptransport.NewRouter(httptransport.NewHandler(uc), allowAll{}, apiKey, nil, probe)
+	require.NoError(t, err)
+	return app{router: router, repos: repos}
 }
 
 func (a app) do(method, target, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -204,7 +207,7 @@ func TestHandler_Subscribe(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := newApp(tt.resolver)
+			a := newApp(t, tt.resolver)
 
 			rec := a.do(http.MethodPost, "/api/v1/subscribe", tt.body, tt.headers)
 
@@ -228,7 +231,7 @@ func TestHandler_Subscribe(t *testing.T) {
 }
 
 func TestHandler_ConfirmListUnsubscribe(t *testing.T) {
-	a := newApp(resolver{})
+	a := newApp(t, resolver{})
 	require.Equal(
 		t,
 		202,
@@ -303,7 +306,7 @@ func TestHandler_ConfirmListUnsubscribe(t *testing.T) {
 }
 
 func TestHandler_Unsubscribe_parallel(t *testing.T) {
-	a := newApp(resolver{})
+	a := newApp(t, resolver{})
 	require.Equal(
 		t,
 		202,
@@ -331,7 +334,7 @@ func TestHandler_Unsubscribe_parallel(t *testing.T) {
 }
 
 func TestRequestID(t *testing.T) {
-	a := newApp(resolver{})
+	a := newApp(t, resolver{})
 
 	t.Run("success - client id is returned", func(t *testing.T) {
 		rec := a.do(http.MethodGet, "/api/v1/confirm/x", "", map[string]string{middleware.HeaderRequestID: "my-id"})

@@ -74,6 +74,16 @@ func provideLimiter(cfg Config) (middleware.Limiter, func(), error) {
 	}, nil
 }
 
-func provideRouter(h *httptransport.Handler, limiter middleware.Limiter, cfg Config) *gin.Engine {
-	return httptransport.NewRouter(h, limiter, cfg.APIKey, probe.NewHandler(buildinfo.Commit))
+func provideRouter(h *httptransport.Handler, limiter middleware.Limiter, cfg Config) (*gin.Engine, error) {
+	engine, err := httptransport.NewRouter(
+		h,
+		limiter,
+		cfg.APIKey,
+		cfg.TrustedProxies,
+		probe.NewHandler(buildinfo.Commit),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build router: %w", err)
+	}
+	return engine, nil
 }
