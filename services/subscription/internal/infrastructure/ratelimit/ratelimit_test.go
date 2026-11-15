@@ -50,142 +50,169 @@ func TestParseRate(t *testing.T) {
 }
 
 func TestRedis_Allow(t *testing.T) {
-	ctx := context.Background()
+	// step is one call of Allow; advance moves the Redis clock first.
+	type step struct {
+		advance time.Duration
+		key     string
+		want    bool
+	}
+	tests := []struct {
+		name    string
+		limit   int64
+		window  time.Duration
+		preset  map[string]string // keys that exist before the first step.
+		steps   []step
+		wantTTL map[string]time.Duration // checked after the last step.
+	}{
+		{
+			name:   "success - requests over the limit are denied until the window passes",
+			limit:  3,
+			window: time.Second,
+			steps: []step{
+				{key: "1.2.3.4", want: true},
+				{key: "1.2.3.4", want: true},
+				{key: "1.2.3.4", want: true},
+				{key: "1.2.3.4", want: false},
+				{key: "5.6.7.8", want: true}, // the limit is per caller.
+				{advance: 2 * time.Second, key: "1.2.3.4", want: true},
+			},
+		},
+		{
+			name:   "success - the exact limit is allowed and one more is not",
+			limit:  1,
+			window: time.Minute,
+			steps:  []step{{key: "k", want: true}, {key: "k", want: false}},
+		},
+		{
+			name:    "success - the first request sets the TTL together with the counter",
+			limit:   3,
+			window:  time.Minute,
+			steps:   []step{{key: "1.2.3.4", want: true}},
+			wantTTL: map[string]time.Duration{"ratelimit:1.2.3.4": time.Minute},
+		},
+		{
+			name:   "success - a repeated request does not extend the window",
+			limit:  2,
+			window: time.Minute,
+			steps: []step{
+				{key: "k", want: true},
+				{advance: 40 * time.Second, key: "k", want: true},
+			},
+			wantTTL: map[string]time.Duration{"ratelimit:k": 20 * time.Second},
+		},
+		{
+			// The old INCR-then-EXPIRE failure left a counter without a TTL.
+			name:   "success - a key left without TTL is healed and expires",
+			limit:  3,
+			window: time.Second,
+			preset: map[string]string{"ratelimit:1.2.3.4": "3"},
+			steps: []step{
+				{key: "1.2.3.4", want: false},
+				{advance: 2 * time.Second, key: "1.2.3.4", want: true}, // the address is not blocked forever.
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mr := miniredis.RunT(t)
+			for k, v := range tt.preset {
+				require.NoError(t, mr.Set(k, v))
+			}
+			limiter := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), tt.limit, tt.window)
 
-	t.Run("success - requests over the limit are denied until the window passes", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Second)
+			for i, s := range tt.steps {
+				mr.FastForward(s.advance)
+				ok, err := limiter.Allow(context.Background(), s.key)
+				require.NoError(t, err, "step %d", i+1)
+				assert.Equal(t, s.want, ok, "step %d", i+1)
+			}
 
-		for i := range 3 {
-			ok, err := l.Allow(ctx, "1.2.3.4")
-			require.NoError(t, err)
-			assert.True(t, ok, "request %d", i+1)
+			for key, ttl := range tt.wantTTL {
+				assert.Equal(t, ttl, mr.TTL(key), key)
+			}
+		})
+	}
+}
+
+func TestRedis_Allow_failures(t *testing.T) {
+	tests := []struct {
+		name string
+		// start returns the address of the broken Redis and the number of connections it has accepted.
+		start        func(t *testing.T) (addr string, accepted *atomic.Int32)
+		wantWithin   time.Duration // the call must fail in less than this; zero means no limit.
+		wantAccepted int32         // the connections the limiter may open; zero means no limit.
+	}{
+		{name: "error - redis down", start: startClosed},
+		{
+			name:       "error - unresponsive redis fails fast instead of holding the request",
+			start:      startSilent,
+			wantWithin: 2 * time.Second,
+		},
+		{name: "error - a failed call is not retried", start: startDropping, wantAccepted: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr, accepted := tt.start(t)
+			client := ratelimit.NewClient(addr, "")
+			t.Cleanup(func() { closeQuietly(client) })
+			limiter := ratelimit.NewRedis(client, 3, time.Second)
+
+			start := time.Now()
+			_, err := limiter.Allow(context.Background(), "k")
+
+			require.Error(t, err)
+			if tt.wantWithin > 0 {
+				assert.Less(t, time.Since(start), tt.wantWithin)
+			}
+			if tt.wantAccepted > 0 {
+				assert.Equal(t, tt.wantAccepted, accepted.Load(), "the limiter must fail open at once, not retry")
+			}
+		})
+	}
+}
+
+// listen opens a loopback listener and calls serve for every accepted connection.
+func listen(t *testing.T, serve func(t *testing.T, conn net.Conn)) (string, *atomic.Int32) {
+	t.Helper()
+
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { closeQuietly(lis) })
+
+	accepted := &atomic.Int32{}
+	go func() {
+		for {
+			conn, acceptErr := lis.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepted.Add(1)
+			serve(t, conn)
 		}
-		ok, err := l.Allow(ctx, "1.2.3.4")
-		require.NoError(t, err)
-		assert.False(t, ok)
+	}()
+	return lis.Addr().String(), accepted
+}
 
-		other, err := l.Allow(ctx, "5.6.7.8")
-		require.NoError(t, err)
-		assert.True(t, other, "the limit is per caller")
+// startClosed returns the address of a Redis that has been shut down.
+func startClosed(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
 
-		mr.FastForward(2 * time.Second)
-		ok, err = l.Allow(ctx, "1.2.3.4")
-		require.NoError(t, err)
-		assert.True(t, ok)
-	})
+	mr := miniredis.RunT(t)
+	addr := mr.Addr()
+	mr.Close()
+	return addr, &atomic.Int32{}
+}
 
-	t.Run("success - the first request sets the TTL together with the counter", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Minute)
+// startSilent returns a server that accepts connections and never answers.
+func startSilent(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	return listen(t, func(t *testing.T, conn net.Conn) { t.Cleanup(func() { closeQuietly(conn) }) })
+}
 
-		_, err := l.Allow(ctx, "1.2.3.4")
-
-		require.NoError(t, err)
-		assert.Equal(t, time.Minute, mr.TTL("ratelimit:1.2.3.4"))
-	})
-
-	t.Run("success - a key left without TTL is healed and expires", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Second)
-		require.NoError(t, mr.Set("ratelimit:1.2.3.4", "3")) // the old INCR-then-EXPIRE failure: counter, no TTL
-		require.Zero(t, mr.TTL("ratelimit:1.2.3.4"))
-
-		ok, err := l.Allow(ctx, "1.2.3.4")
-		require.NoError(t, err)
-		assert.False(t, ok)
-		assert.Equal(t, time.Second, mr.TTL("ratelimit:1.2.3.4"))
-
-		mr.FastForward(2 * time.Second)
-		ok, err = l.Allow(ctx, "1.2.3.4")
-		require.NoError(t, err)
-		assert.True(t, ok, "the address is not blocked forever")
-	})
-
-	t.Run("error - redis down", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 3, time.Second)
-		mr.Close()
-
-		_, err := l.Allow(ctx, "1.2.3.4")
-
-		require.Error(t, err)
-	})
-
-	t.Run("success - the exact limit is allowed and one more is not", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 1, time.Minute)
-
-		first, err := l.Allow(ctx, "k")
-		require.NoError(t, err)
-		second, err := l.Allow(ctx, "k")
-		require.NoError(t, err)
-
-		assert.True(t, first)
-		assert.False(t, second)
-	})
-
-	t.Run("success - the window restarts only after the TTL, not on every request", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		l := ratelimit.NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}), 2, time.Minute)
-
-		_, err := l.Allow(ctx, "k")
-		require.NoError(t, err)
-		mr.FastForward(40 * time.Second)
-		_, err = l.Allow(ctx, "k")
-		require.NoError(t, err)
-
-		assert.Equal(t, 20*time.Second, mr.TTL("ratelimit:k"), "a repeated request must not extend the window")
-	})
-
-	t.Run("error - unresponsive redis fails fast instead of holding the request", func(t *testing.T) {
-		lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		t.Cleanup(func() { closeQuietly(lis) })
-		go func() { // accepts the connection and never answers.
-			for {
-				conn, acceptErr := lis.Accept()
-				if acceptErr != nil {
-					return
-				}
-				t.Cleanup(func() { closeQuietly(conn) })
-			}
-		}()
-		client := ratelimit.NewClient(lis.Addr().String(), "")
-		t.Cleanup(func() { closeQuietly(client) })
-		l := ratelimit.NewRedis(client, 3, time.Second)
-
-		start := time.Now()
-		_, err = l.Allow(ctx, "k")
-
-		require.Error(t, err)
-		assert.Less(t, time.Since(start), 2*time.Second)
-	})
-
-	t.Run("error - a failed call is not retried", func(t *testing.T) {
-		lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		t.Cleanup(func() { closeQuietly(lis) })
-		var accepted atomic.Int32
-		go func() { // drops every connection at once: a retryable network error.
-			for {
-				conn, acceptErr := lis.Accept()
-				if acceptErr != nil {
-					return
-				}
-				accepted.Add(1)
-				closeQuietly(conn)
-			}
-		}()
-		client := ratelimit.NewClient(lis.Addr().String(), "")
-		t.Cleanup(func() { closeQuietly(client) })
-		l := ratelimit.NewRedis(client, 3, time.Second)
-
-		_, err = l.Allow(ctx, "k")
-
-		require.Error(t, err)
-		assert.EqualValues(t, 1, accepted.Load(), "the limiter must fail open at once, not retry")
-	})
+// startDropping returns a server that closes every connection at once: a retryable network error.
+func startDropping(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	return listen(t, func(_ *testing.T, conn net.Conn) { closeQuietly(conn) })
 }
 
 // closeQuietly closes c and only logs a failure: a cleanup error must not fail a test that already has its result.
