@@ -119,7 +119,11 @@ jobs:
         with:
           go-version: '1.25'
           cache: false
-      - name: Measure statement coverage of unit and integration tests
+      - name: Measure statement coverage of unit and integration tests; the services must stay at 80% or more
+        shell: bash # with an explicit shell the step runs with pipefail, so a failed make is not hidden by tee
+        env:
+          COVER_MIN: 80
+          COVER_GATED: services/subscription services/tracking
         run: make cover | tee coverage-summary.txt
       - name: Show the numbers in the job summary
         if: always()

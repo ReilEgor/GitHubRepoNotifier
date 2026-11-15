@@ -13,7 +13,7 @@
 #   mutation    mutation testing with gremlins on the critical packages; reports go to reports/mutation
 #   e2e         Playwright tests against the whole system started like the smoke test (needs Docker, Node.js)
 #
-# Variables: COVER_MODULES (modules to measure), COVER_MIN (fail below this percent of a module),
+# Variables: COVER_MODULES (modules to measure), COVER_MIN (fail below this percent of a module in COVER_GATED),
 #            MUTATION_TARGETS ("module:package ..."), MUTATION_WORKERS, MUTATION_MIN_EFFICACY, MUTATION_FLAGS.
 
 set -eu
@@ -29,6 +29,8 @@ BIN=bin
 
 COVER_MODULES=${COVER_MODULES:-$INTEGRATION_MODULES}
 COVER_MIN=${COVER_MIN:-0}
+# Modules that must reach COVER_MIN; the others are only reported.
+COVER_GATED=${COVER_GATED:-$COVER_MODULES}
 COVER_DIR=reports/coverage
 
 # Packages whose logic matters most; each entry is module:package[:excluded-files-regexp]. gremlins walks into
@@ -313,9 +315,13 @@ cover_run() {
 		}
 		modpath=$(awk '$1 == "module" { print $2 }' "$m/go.mod")
 		cover_report "$profile" "$modpath" "$COVER_DIR/$name.total"
-		if awk -v p="$(cat "$COVER_DIR/$name.total")" -v min="$COVER_MIN" 'BEGIN { exit !(p + 0 < min + 0) }'; then
-			failed="$failed $m"
-		fi
+		case " $COVER_GATED " in
+		*" $m "*)
+			if awk -v p="$(cat "$COVER_DIR/$name.total")" -v min="$COVER_MIN" 'BEGIN { exit !(p + 0 < min + 0) }'; then
+				failed="$failed $m"
+			fi
+			;;
+		esac
 	done
 	if [ -n "$failed" ]; then
 		echo "error: coverage is below ${COVER_MIN}% in:$failed" >&2
