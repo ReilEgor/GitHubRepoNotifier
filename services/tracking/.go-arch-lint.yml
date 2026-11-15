@@ -34,8 +34,10 @@ components:
   usecase-impl:     { in: internal/usecase/** }
   repository-impl:  { in: internal/repository/** }
   infrastructure:   { in: internal/infrastructure/** }
-  transport:        { in: internal/transport/** }
+  transport-grpc:   { in: internal/transport/grpc }
+  transport-broker: { in: internal/transport/broker/** }
   cmd:              { in: cmd/** }
+  migrations:       { in: migrations }
 
 deps:
   repository-iface:
@@ -59,8 +61,15 @@ deps:
     mayDependOn: [model, repository-iface, service-iface]
     anyVendorDeps: true
 
-  transport:
-    mayDependOn: [model, usecase-iface, transport]
+  transport-grpc:
+    mayDependOn: [model, usecase-iface]
+    anyVendorDeps: true
+
+  transport-broker:
+    mayDependOn: [model, usecase-iface]
+    anyVendorDeps: true
+
+  migrations:
     anyVendorDeps: true
 
   cmd:

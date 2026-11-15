@@ -28,7 +28,7 @@ jobs:
         with:
           version: v2.12.1
           working-directory: ${{ matrix.module }}
-          args: --timeout=5m
+          args: --timeout=5m --build-tags integration
       - name: Install go-arch-lint
         run: go install github.com/fe3dback/go-arch-lint@v1.15.0
       - name: Run go-arch-lint (${{ matrix.module }})
@@ -43,11 +43,11 @@ jobs:
         with:
           go-version: '1.25'
           cache: false
-      - name: Run Unit Tests
-        run: make test
+      - name: Run unit tests (no Docker)
+        run: make unit
 
-  smoke:
-    name: Build and Smoke Test
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,5 +55,33 @@ jobs:
         with:
           go-version: '1.25'
           cache: false
-      - name: Build, start every service, check /health and /version
+      - name: Run integration tests on PostgreSQL in Testcontainers
+        run: make test-integration
+
+  generated-code:
+    name: Generated Code Is Up To Date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Install pinned tools
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          make setup
+      - name: Regenerate protobuf and wire code and fail on any difference
+        run: make generate-check
+
+  smoke:
+    name: Smoke Test on Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Migrate, start every service and walk through the user flow
         run: make smoke
